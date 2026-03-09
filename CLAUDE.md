@@ -14,13 +14,15 @@ Perch-ClimbingEdition is a climbing safety monitoring system that uses an Arduin
 
 ### IMU Firmware (`imu/imu.ino`)
 
-The active firmware uses a **Madgwick AHRS filter** for orientation estimation:
+The active firmware uses a **custom Madgwick AHRS filter** (`MadgwickFilter.h`) with quaternion seeding for instant orientation lock:
 
-- **Calibration**: Captures baseline roll/pitch by averaging 200 accelerometer samples (~2s at 100Hz)
-- **Detection**: Uses rolling window debouncing (50 samples, trigger at 80% above threshold) to detect sustained hip drops (>20° deviation from baseline)
-- **Output**: Serial prints roll/pitch/deviation at 100Hz (~10ms loop delay)
+- **BLE Peripheral**: Advertises as "Elfo" with service `1101` and 4 characteristics (roll, pitch, deviation, alert)
+- **Calibration**: Captures baseline roll/pitch by averaging 200 accelerometer samples (~2s at 100Hz), then seeds filter quaternion from accelerometer
+- **Detection**: Uses rolling window debouncing (50 samples, trigger at 80% above threshold) to detect sustained hip drops (>20° deviation from baseline). Uses Madgwick-filtered roll/pitch for detection.
+- **Output**: Filter runs at 100Hz; BLE writes + serial prints throttled to ~5Hz (200ms interval)
+- **LED**: Built-in LED lights during active hip drop alert
 
-**Deprecated version** (`imu/peripheral_roll_pitch`): Uses complementary filter instead of Madgwick, includes BLE peripheral code with 4 characteristics (roll, pitch, deviation, alert).
+**Legacy version** (`imu/peripheral_roll_pitch`): Uses complementary filter instead of Madgwick, simpler detection without rolling-window debounce.
 
 ### BLE Communication
 
@@ -28,26 +30,33 @@ The active firmware uses a **Madgwick AHRS filter** for orientation estimation:
 **Characteristics**:
 - `2101` - Roll (float32, degrees)
 - `2102` - Pitch (float32, degrees)
-- `2103` - Deviation (float32, degrees) [deprecated firmware only]
-- `2104` - Alert (boolean) [deprecated firmware only]
-
-**Note**: Current `imu.ino` does NOT include BLE - it's serial-only. The BLE code is in the deprecated `peripheral_roll_pitch` file.
+- `2103` - Deviation (float32, degrees)
+- `2104` - Alert (boolean)
 
 ### Node.js Central (`perch/central.js`)
 
 - Uses `@abandonware/noble` for BLE scanning/connection
-- Polls roll/pitch characteristics at ~5Hz (200ms interval)
+- Polls all 4 characteristics at ~5Hz (200ms interval)
 - Exposes Express server on port 3000 with:
   - `GET /` - Serves dashboard
-  - `GET /api/sensor` - Returns `{ attitude: { roll, pitch } }`
+  - `GET /api/sensor` - Returns `{ attitude: { roll, pitch, deviation, alert } }`
   - `POST /` - Also returns sensor data (legacy endpoint)
 
 ### Web Dashboard (`perch/views/index.ejs`)
 
-- EJS template with Chart.js for real-time line graphs
-- Polls `/api/sensor` every 50ms
-- Displays last 120 samples of roll/pitch data
-- Dark theme optimized for monitoring
+- Deviation gauge with green/yellow/red zones (0-15°/15-20°/20°+)
+- 2D hip position dot showing roll/pitch on a bullseye
+- Chart.js time-series with threshold annotation lines at ±20°
+- Session recording with start/stop, live stats (duration, samples, max deviation, alerts), and CSV download
+- Polls `/api/sensor` every 50ms, displays last 200 samples
+- Dark theme optimized for demo/monitoring
+
+### Serial Logger (`perch/logger.js`)
+
+- Standalone CLI tool for recording IMU data directly from Arduino serial output
+- Auto-detects Arduino serial port, parses firmware output format
+- Writes timestamped CSV with roll/pitch/yaw/deviation/alert columns
+- Keyboard controls: SPACE pause/resume, Q stop and save
 
 ## Common Commands
 
@@ -121,12 +130,14 @@ From `imu.ino` comments:
 
 ```
 imu/
-  imu.ino                    # Active Madgwick-based firmware (serial only)
-  peripheral_roll_pitch      # Deprecated complementary filter firmware (with BLE)
+  imu.ino                    # Active firmware: Madgwick filter + BLE peripheral
+  MadgwickFilter.h           # Custom Madgwick AHRS with quaternion seeding
+  peripheral_roll_pitch      # Legacy: complementary filter version
 
 perch/
   central.js                 # BLE central + Express server
-  package.json               # Dependencies: noble, express, ejs
+  logger.js                  # Standalone serial IMU logger (CSV output)
+  package.json               # Dependencies: noble, express, ejs, serialport
   views/
-    index.ejs                # Dashboard UI with Chart.js
+    index.ejs                # Dashboard UI with gauge, hip dot, chart, session recording
 ```

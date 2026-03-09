@@ -3,14 +3,14 @@
 const noble = require('@abandonware/noble');
 
 const uuid_service = "1101";
-// 2101 → roll, 2102 → pitch (float32, degrees)
+// 2101 → roll, 2102 → pitch, 2103 → deviation, 2104 → alert (float32/bool)
 const uuid_roll = "2101", uuid_pitch = "2102";
+const uuid_deviation = "2103", uuid_alert = "2104";
 
-const uuid_characteristics = [uuid_roll, uuid_pitch];
+const uuid_characteristics = [uuid_roll, uuid_pitch, uuid_deviation, uuid_alert];
 
-// { attitude: { roll, pitch } } — degrees
 let sensorData = {
-    attitude: { roll: 0, pitch: 0 }
+    attitude: { roll: 0, pitch: 0, deviation: 0, alert: false }
 };
 
 noble.on('stateChange', async (state) => {
@@ -56,6 +56,17 @@ async function readData(byUuid) {
     if (byUuid[uuid_pitch]) {
         const v = await read(uuid_pitch);
         if (v != null) sensorData.attitude.pitch = v;
+    }
+    if (byUuid[uuid_deviation]) {
+        const v = await read(uuid_deviation);
+        if (v != null) sensorData.attitude.deviation = v;
+    }
+    if (byUuid[uuid_alert]) {
+        const c = byUuid[uuid_alert];
+        try {
+            const buf = await c.readAsync();
+            sensorData.attitude.alert = buf && buf.length > 0 && buf[0] !== 0;
+        } catch (e) { /* ignore */ }
     }
 
     console.log('attitude', sensorData.attitude);

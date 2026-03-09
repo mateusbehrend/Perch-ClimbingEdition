@@ -1,13 +1,30 @@
+#include <ArduinoBLE.h>
 #include <Arduino_LSM6DSOX.h>
 #include "MadgwickFilter.h"
 
 // =============================================================
-//  Madgwick-based Hip Drop Detector for Climbing
+//  Madgwick-based Hip Drop Detector for Climbing (with BLE)
 //  Device is hip-mounted on a belt:
 //    Z-axis → straight out from the climber (forward)
 //    X-axis → horizontal (left/right)
 //    Y-axis → vertical (up/down)
 // =============================================================
+
+// --- BLE UUIDs ---
+#define BLE_UUID_IMU_SERVICE   "1101"
+#define BLE_UUID_ROLL          "2101"
+#define BLE_UUID_PITCH         "2102"
+#define BLE_UUID_DEVIATION     "2103"
+#define BLE_UUID_ALERT         "2104"
+
+#define BLE_DEVICE_NAME "Elfo"
+#define BLE_LOCAL_NAME  "Elfo"
+
+BLEService imuService(BLE_UUID_IMU_SERVICE);
+BLEFloatCharacteristic rollCharacteristic(BLE_UUID_ROLL, BLERead | BLENotify);
+BLEFloatCharacteristic pitchCharacteristic(BLE_UUID_PITCH, BLERead | BLENotify);
+BLEFloatCharacteristic deviationCharacteristic(BLE_UUID_DEVIATION, BLERead | BLENotify);
+BLEBoolCharacteristic  alertCharacteristic(BLE_UUID_ALERT, BLERead | BLENotify);
 
 // --- Madgwick Filter ---
 MadgwickFilter filter;
@@ -15,6 +32,8 @@ const float SAMPLE_RATE = 100.0;  // Hz (match your loop timing)
 
 // --- Timing ---
 unsigned long lastTime = 0;
+unsigned long lastBleUpdate = 0;
+const unsigned long BLE_UPDATE_INTERVAL_MS = 200; // 5 Hz BLE updates
 
 // --- Orientation from filter ---
 float roll  = 0.0;
@@ -105,18 +124,41 @@ void runCalibration() {
 // =============================================================
 void setup() {
   Serial.begin(115200);
-  while (!Serial);
+  pinMode(LED_BUILTIN, OUTPUT);
 
   if (!IMU.begin()) {
     Serial.println("Failed to initialize IMU!");
     while (1);
   }
-
   Serial.println("IMU initialized (Madgwick filter).");
+
+  // --- Initialize BLE ---
+  if (!BLE.begin()) {
+    Serial.println("Failed to start BLE!");
+    while (1);
+  }
+
+  BLE.setDeviceName(BLE_DEVICE_NAME);
+  BLE.setLocalName(BLE_LOCAL_NAME);
+  BLE.setAdvertisedService(imuService);
+
+  imuService.addCharacteristic(rollCharacteristic);
+  imuService.addCharacteristic(pitchCharacteristic);
+  imuService.addCharacteristic(deviationCharacteristic);
+  imuService.addCharacteristic(alertCharacteristic);
+  BLE.addService(imuService);
+
+  rollCharacteristic.writeValue(0.0f);
+  pitchCharacteristic.writeValue(0.0f);
+  deviationCharacteristic.writeValue(0.0f);
+  alertCharacteristic.writeValue(false);
+
+  BLE.advertise();
+  Serial.println("BLE advertising, waiting for connections...");
 
   lastTime = micros();
 
-  // run calibration once during setup
+  // Run calibration once at startup
   runCalibration();
 }
 
@@ -124,6 +166,8 @@ void setup() {
 //  Main loop
 // =============================================================
 void loop() {
+  BLE.poll();
+
   if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
 
     // --- Read sensors ---
@@ -131,31 +175,19 @@ void loop() {
     IMU.readAcceleration(ax, ay, az);
     IMU.readGyroscope(gx, gy, gz);
 
-    // --- Update Madgwick filter ---
+    // --- Update Madgwick filter at full rate (100 Hz) ---
     filter.updateIMU(gx, gy, gz, ax, ay, az);
 
     roll  = filter.getRoll();
     pitch = filter.getPitch();
     yaw   = filter.getYaw();
 
-    // --- Output orientation ---
-    Serial.print("Roll: ");
-    Serial.print(roll, 1);
-    Serial.print("°  |  Pitch: ");
-    Serial.print(pitch, 1);
-    Serial.print("°  |  Yaw: ");
-    Serial.print(yaw, 1);
-    Serial.print("°");
-
-    // --- Hip drop detection with rolling-window debounce ---
+    // --- Hip drop detection with rolling-window debounce (100 Hz) ---
+    float deviation = 0.0;
     if (calibrated) {
       float deltaRoll  = roll  - baselineRoll;
       float deltaPitch = pitch - baselinePitch;
-      float deviation  = sqrt(deltaRoll * deltaRoll + deltaPitch * deltaPitch);
-
-      Serial.print("  |  Dev: ");
-      Serial.print(deviation, 1);
-      Serial.print("°");
+      deviation = sqrt(deltaRoll * deltaRoll + deltaPitch * deltaPitch);
 
       // Determine if this sample is above threshold
       bool aboveNow = (deviation > ALERT_THRESHOLD);
@@ -169,18 +201,47 @@ void loop() {
       // Trigger alert when enough samples in the window exceeded threshold
       if (aboveCount >= DEBOUNCE_TRIGGER_COUNT) {
         hipDropActive = true;
-        Serial.print("  *** HIP DROP ALERT ***");
       } else if (hipDropActive) {
-        // Cleared: majority of window is now below threshold
         hipDropActive = false;
-        Serial.print("  (hip drop cleared)");
-      } else {
-        Serial.print("  (no hip drop)");
       }
     }
 
-    Serial.println();
-    delay(10);  // ~100 Hz to match SAMPLE_RATE
+    // --- Throttled BLE + Serial output at ~5 Hz ---
+    unsigned long nowMs = millis();
+    if (nowMs - lastBleUpdate >= BLE_UPDATE_INTERVAL_MS) {
+      lastBleUpdate = nowMs;
+
+      // Write BLE characteristics
+      rollCharacteristic.writeValue(roll);
+      pitchCharacteristic.writeValue(pitch);
+      deviationCharacteristic.writeValue(deviation);
+      alertCharacteristic.writeValue(hipDropActive);
+
+      // Serial output
+      Serial.print("Roll: ");
+      Serial.print(roll, 1);
+      Serial.print("°  |  Pitch: ");
+      Serial.print(pitch, 1);
+      Serial.print("°  |  Yaw: ");
+      Serial.print(yaw, 1);
+      Serial.print("°");
+
+      if (calibrated) {
+        Serial.print("  |  Dev: ");
+        Serial.print(deviation, 1);
+        Serial.print("°");
+
+        if (hipDropActive) {
+          Serial.print("  *** HIP DROP ALERT ***");
+          digitalWrite(LED_BUILTIN, HIGH);
+        } else {
+          Serial.print("  (no hip drop)");
+          digitalWrite(LED_BUILTIN, LOW);
+        }
+      }
+
+      Serial.println();
+    }
   }
 
   delay(1);

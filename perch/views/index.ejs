@@ -341,11 +341,6 @@
     const dataRoll = [], dataPitch = [], dataLabels = [];
     let sampleIndex = 0;
 
-    // ---- Baseline (captured from first N samples or via calibration) ----
-    let baselineRoll = null, baselinePitch = null;
-    const BASELINE_SAMPLES = 40;
-    let baselineBuf = [];
-
     // ---- Session recording ----
     let recording = false;
     let recStart = null;
@@ -514,13 +509,6 @@
       }
     }
 
-    function computeDeviation(roll, pitch) {
-      if (baselineRoll == null) return null;
-      const dr = roll - baselineRoll;
-      const dp = pitch - baselinePitch;
-      return Math.sqrt(dr * dr + dp * dp);
-    }
-
     // ---- Recording ----
     function toggleRecording() {
       if (!recording) {
@@ -555,10 +543,10 @@
 
     function downloadCSV() {
       if (recData.length === 0) return;
-      let csv = 'timestamp_ms,elapsed_s,roll_deg,pitch_deg,deviation_deg\n';
+      let csv = 'timestamp_ms,elapsed_s,roll_deg,pitch_deg,deviation_deg,alert\n';
       const t0 = recData[0].t;
       for (const r of recData) {
-        csv += `${r.t},${((r.t - t0) / 1000).toFixed(3)},${r.roll.toFixed(3)},${r.pitch.toFixed(3)},${r.dev.toFixed(3)}\n`;
+        csv += `${r.t},${((r.t - t0) / 1000).toFixed(3)},${r.roll.toFixed(3)},${r.pitch.toFixed(3)},${r.dev.toFixed(3)},${r.alert ? 1 : 0}\n`;
       }
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
@@ -582,42 +570,29 @@
         if (!a) throw new Error('no attitude data');
 
         const roll = a.roll, pitch = a.pitch;
-
-        // Baseline capture
-        if (baselineRoll == null) {
-          baselineBuf.push({ roll, pitch });
-          if (baselineBuf.length >= BASELINE_SAMPLES) {
-            baselineRoll = baselineBuf.reduce((s, b) => s + b.roll, 0) / baselineBuf.length;
-            baselinePitch = baselineBuf.reduce((s, b) => s + b.pitch, 0) / baselineBuf.length;
-          }
-        }
-
-        // Deviation
-        const dev = computeDeviation(roll, pitch);
+        const dev = a.deviation != null ? a.deviation : 0;
+        const alertActive = a.alert || false;
 
         // Update displays
         document.getElementById('roll-val').textContent = fmt(roll) + '\u00B0';
         document.getElementById('pitch-val').textContent = fmt(pitch) + '\u00B0';
 
-        if (dev != null) {
-          document.getElementById('dev-value').textContent = fmt(dev);
-          drawGaugeFg(dev);
-          if (dev < THRESHOLD_WARN) {
-            document.getElementById('dev-status').textContent = 'Good position';
-            document.getElementById('dev-status').style.color = 'var(--green)';
-          } else if (dev < THRESHOLD_ALERT) {
-            document.getElementById('dev-status').textContent = 'Watch posture';
-            document.getElementById('dev-status').style.color = 'var(--yellow)';
-          } else {
-            document.getElementById('dev-status').textContent = 'Hip drop!';
-            document.getElementById('dev-status').style.color = 'var(--red)';
-          }
+        document.getElementById('dev-value').textContent = fmt(dev);
+        drawGaugeFg(dev);
+        if (dev < THRESHOLD_WARN) {
+          document.getElementById('dev-status').textContent = 'Good position';
+          document.getElementById('dev-status').style.color = 'var(--green)';
+        } else if (dev < THRESHOLD_ALERT) {
+          document.getElementById('dev-status').textContent = 'Watch posture';
+          document.getElementById('dev-status').style.color = 'var(--yellow)';
+        } else {
+          document.getElementById('dev-status').textContent = alertActive ? 'HIP DROP!' : 'Hip drop!';
+          document.getElementById('dev-status').style.color = 'var(--red)';
         }
 
-        // Hip dot uses relative values from baseline
-        const relRoll = baselineRoll != null ? roll - baselineRoll : roll;
-        const relPitch = baselinePitch != null ? pitch - baselinePitch : pitch;
-        updateHipDot(relRoll, relPitch);
+        // Hip dot — use deviation direction (roll/pitch relative to baseline)
+        // The device computes deviation magnitude; we use roll/pitch as proxy for direction
+        updateHipDot(roll, pitch);
 
         // Chart
         dataRoll.push(roll);
@@ -634,16 +609,14 @@
 
         // Recording
         if (recording) {
-          const devVal = dev != null ? dev : 0;
-          recData.push({ t: Date.now(), roll, pitch, dev: devVal });
+          recData.push({ t: Date.now(), roll, pitch, dev, alert: alertActive });
           document.getElementById('s-cnt').textContent = recData.length;
-          if (devVal > maxDev) {
-            maxDev = devVal;
+          if (dev > maxDev) {
+            maxDev = dev;
             document.getElementById('s-max').textContent = fmt(maxDev) + '\u00B0';
           }
-          const isAlert = devVal >= THRESHOLD_ALERT;
-          if (isAlert && !lastAlertState) alertCount++;
-          lastAlertState = isAlert;
+          if (alertActive && !lastAlertState) alertCount++;
+          lastAlertState = alertActive;
           document.getElementById('s-alerts').textContent = alertCount;
         }
 
