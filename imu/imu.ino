@@ -11,7 +11,7 @@
 
 // --- Madgwick Filter ---
 Madgwick filter;
-const float SAMPLE_RATE = 50.0;  // Hz (match your loop timing)
+const float SAMPLE_RATE = 100.0;  // Hz (match your loop timing)
 
 // --- Timing ---
 unsigned long lastTime = 0;
@@ -26,15 +26,15 @@ float baselineRoll  = 0.0;
 float baselinePitch = 0.0;
 bool  calibrated    = false;
 
-const int CAL_SAMPLES = 100;  // ~2 seconds at 50 Hz
+const int CAL_SAMPLES = 200;  // ~2 seconds at 100 Hz
 
 // --- Hip Drop Detection (rolling-window debounce) ---
 const float ALERT_THRESHOLD = 20.0;  // degrees of deviation
 
-// Rolling window: 25 samples at 50 Hz = 0.5 seconds
-// Trigger when >= 20 of the last 25 samples exceed threshold (~80%)
-const int DEBOUNCE_WINDOW        = 25;
-const int DEBOUNCE_TRIGGER_COUNT = 20;
+// Rolling window: 50 samples at 100 Hz = 0.5 seconds
+// Trigger when >= 40 of the last 50 samples exceed threshold (~80%)
+const int DEBOUNCE_WINDOW        = 50;
+const int DEBOUNCE_TRIGGER_COUNT = 40;
 
 bool  sampleBuffer[DEBOUNCE_WINDOW];  // circular buffer (true = above threshold)
 int   bufferIndex    = 0;              // current write position
@@ -48,6 +48,24 @@ void runCalibration() {
   Serial.println(">> Calibration started. Hold good position...");
   delay(1000);
 
+  // --- Warm up the Madgwick filter (~2 seconds) ---
+  // The filter starts from a default quaternion and needs time to
+  // converge to the actual orientation. Discard these early readings.
+  Serial.println(">> Warming up filter...");
+  int warmup = 0;
+  while (warmup < 200) {
+    if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
+      float ax, ay, az, gx, gy, gz;
+      IMU.readAcceleration(ax, ay, az);
+      IMU.readGyroscope(gx, gy, gz);
+      filter.updateIMU(gx, gy, gz, ax, ay, az);
+      warmup++;
+      delay(10);
+    }
+  }
+  Serial.println(">> Filter converged. Capturing baseline...");
+
+  // --- Now capture the actual baseline ---
   float sumRoll = 0.0, sumPitch = 0.0;
   int   count   = 0;
 
@@ -64,7 +82,7 @@ void runCalibration() {
       sumPitch += filter.getPitch();
       count++;
 
-      delay(20);  // ~50 Hz
+      delay(10);  // ~50 Hz
     }
   }
 
@@ -160,7 +178,7 @@ void loop() {
     }
 
     Serial.println();
-    delay(20);  // ~50 Hz to match SAMPLE_RATE
+    delay(10);  // ~100 Hz to match SAMPLE_RATE
   }
 
   delay(1);
