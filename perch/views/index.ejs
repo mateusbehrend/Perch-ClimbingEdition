@@ -1,194 +1,451 @@
-<!-- This is mostly created with the help of Cursor -->
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Orientation Dashboard — BLE roll &amp; pitch</title>
+  <title>Perch — Climbing Hip Monitor</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
   <style>
     :root {
-      --bg: #0d0f14;
-      --surface: #161a22;
-      --border: #2a3142;
+      --bg: #0a0c10;
+      --surface: #13161d;
+      --surface2: #1a1e28;
+      --border: #252b3b;
       --text: #e6e9f0;
-      --muted: #7a8299;
-      --accel: #6ee7b7;
-      --x: #f472b6;
-      --y: #a78bfa;
-      --z: #34d399;
-      --glow-accel: rgba(110, 231, 183, 0.15);
+      --muted: #6b7394;
+      --roll: #f472b6;
+      --pitch: #818cf8;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --red: #f87171;
+      --green-dim: rgba(52, 211, 153, 0.12);
+      --yellow-dim: rgba(251, 191, 36, 0.08);
+      --red-dim: rgba(248, 113, 113, 0.08);
     }
 
-    * { box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      margin: 0;
       min-height: 100vh;
       background: var(--bg);
       color: var(--text);
       font-family: 'Outfit', sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 2rem 1rem;
+      padding: 1.5rem;
     }
 
-    h1 {
-      font-weight: 600;
-      font-size: 1.5rem;
-      letter-spacing: 0.02em;
-      margin-bottom: 0.25rem;
-    }
-
-    .subtitle {
-      font-size: 0.85rem;
-      color: var(--muted);
+    .header {
+      text-align: center;
       margin-bottom: 1.5rem;
     }
+    .header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.03em; }
+    .header .sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
 
-    .layout {
-      width: 100%;
-      max-width: 800px;
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
+    .grid {
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      grid-template-rows: auto auto;
+      gap: 1rem;
     }
 
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 1.25rem 1.5rem;
-      position: relative;
-      overflow: hidden;
+      border-radius: 14px;
+      padding: 1.25rem;
     }
-
-    .card::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, var(--accel), transparent);
-      box-shadow: 0 0 20px var(--glow-accel);
-    }
-
-    .card h2 {
-      font-size: 0.75rem;
+    .card-label {
+      font-size: 0.65rem;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin: 0 0 1rem 0;
-      color: var(--accel);
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin-bottom: 1rem;
     }
 
-    .values {
+    /* ---- Gauge card ---- */
+    .gauge-card {
+      grid-row: 1 / 3;
       display: flex;
-      gap: 2rem;
-      flex-wrap: wrap;
-    }
-
-    .row {
-      display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 0.5rem;
+    }
+    .gauge-container {
+      position: relative;
+      width: 220px;
+      height: 220px;
+    }
+    .gauge-bg, .gauge-fg {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+    .gauge-center {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+    .gauge-value {
       font-family: 'JetBrains Mono', monospace;
+      font-size: 2rem;
+      font-weight: 600;
+      line-height: 1;
+    }
+    .gauge-unit {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 0.2rem;
+    }
+    .gauge-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.15rem;
     }
 
-    .axis { font-size: 0.9rem; color: var(--muted); }
-    .value { font-size: 1.1rem; font-weight: 600; min-width: 6ch; text-align: right; color: var(--accel); }
-    .row.x .value { color: var(--x); }
-    .row.y .value { color: var(--y); }
-    .row.z .value { color: var(--z); }
-    .unit { font-size: 0.7rem; color: var(--muted); }
+    .values-row {
+      display: flex;
+      gap: 1.5rem;
+      margin-top: 1.25rem;
+      width: 100%;
+      justify-content: center;
+    }
+    .val-block { text-align: center; }
+    .val-block .label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+    .val-block .num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-top: 0.15rem;
+    }
+    .val-block .num.roll-color { color: var(--roll); }
+    .val-block .num.pitch-color { color: var(--pitch); }
 
+    /* ---- Hip visual ---- */
+    .hip-visual {
+      margin-top: 1.25rem;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .hip-dot-container {
+      position: relative;
+      width: 160px;
+      height: 160px;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+    .hip-ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px dashed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .hip-ring.inner { width: 50%; height: 50%; border-color: rgba(52,211,153,0.3); }
+    .hip-ring.outer { width: 80%; height: 80%; border-color: rgba(251,191,36,0.25); }
+    .hip-crosshair {
+      position: absolute;
+      background: var(--border);
+    }
+    .hip-crosshair.h { width: 100%; height: 1px; top: 50%; }
+    .hip-crosshair.v { height: 100%; width: 1px; left: 50%; }
+    .hip-dot {
+      position: absolute;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 12px rgba(52, 211, 153, 0.6);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      transition: all 0.08s ease-out;
+    }
+
+    /* ---- Chart card ---- */
+    .chart-card { min-height: 0; }
     .chart-wrap {
       position: relative;
-      height: 260px;
+      height: 240px;
       width: 100%;
     }
 
-    .status {
-      margin-top: 0.5rem;
+    /* ---- Session card ---- */
+    .session-card {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .session-card .card-label { margin-bottom: 0; }
+
+    .btn {
+      font-family: 'Outfit', sans-serif;
       font-size: 0.8rem;
-      color: var(--muted);
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      padding: 0.55rem 1.2rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-start { background: var(--green); color: #0a0c10; }
+    .btn-start:hover { filter: brightness(1.15); }
+    .btn-stop { background: var(--red); color: #fff; }
+    .btn-stop:hover { filter: brightness(1.15); }
+    .btn-download {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-download:hover { border-color: var(--muted); }
+    .btn:disabled { opacity: 0.4; cursor: default; filter: none; }
+
+    .session-stats {
+      display: flex;
+      gap: 1.5rem;
+      margin-left: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+    .stat-item .stat-label { font-size: 0.6rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+    .stat-item .stat-val { margin-top: 0.1rem; }
+
+    /* ---- Status bar ---- */
+    .status-bar {
+      max-width: 1100px;
+      margin: 1rem auto 0;
       display: flex;
       align-items: center;
       gap: 0.5rem;
+      font-size: 0.75rem;
+      color: var(--muted);
     }
-
     .status-dot {
-      width: 8px;
-      height: 8px;
+      width: 7px; height: 7px;
       border-radius: 50%;
       background: var(--muted);
+    }
+    .status-dot.live {
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
       animation: pulse 2s ease-in-out infinite;
     }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
-    .status-dot.live {
-      background: var(--accel);
-      box-shadow: 0 0 8px var(--accel);
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
+    /* ---- Responsive ---- */
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: 1fr; }
+      .gauge-card { grid-row: auto; }
+      .session-stats { margin-left: 0; }
     }
   </style>
 </head>
 <body>
-  <h1>Orientation Dashboard</h1>
-  <p class="subtitle">Arduino Nano 2040 · Roll &amp; pitch via BLE</p>
+  <div class="header">
+    <h1>Perch — Hip Position Monitor</h1>
+    <div class="sub">Climbing session tracker &middot; Roll &amp; Pitch via BLE</div>
+  </div>
 
-  <div class="layout">
-    <div class="card">
-      <h2>Orientation (degrees)</h2>
-      <div class="values">
-        <div class="row x"><span class="axis">Roll</span><span class="value" id="roll">—</span><span class="unit">°</span></div>
-        <div class="row y"><span class="axis">Pitch</span><span class="value" id="pitch">—</span><span class="unit">°</span></div>
+  <div class="grid">
+    <!-- Left: Gauge + hip position -->
+    <div class="card gauge-card">
+      <div class="card-label">Deviation from baseline</div>
+
+      <div class="gauge-container">
+        <canvas class="gauge-bg" id="gauge-bg" width="220" height="220"></canvas>
+        <canvas class="gauge-fg" id="gauge-fg" width="220" height="220"></canvas>
+        <div class="gauge-center">
+          <div class="gauge-value" id="dev-value">--</div>
+          <div class="gauge-unit">degrees</div>
+          <div class="gauge-label" id="dev-status">No data</div>
+        </div>
+      </div>
+
+      <div class="values-row">
+        <div class="val-block">
+          <div class="label">Roll</div>
+          <div class="num roll-color" id="roll-val">--</div>
+        </div>
+        <div class="val-block">
+          <div class="label">Pitch</div>
+          <div class="num pitch-color" id="pitch-val">--</div>
+        </div>
+      </div>
+
+      <div class="hip-visual">
+        <div class="card-label" style="margin-bottom:0.5rem">Hip Position</div>
+        <div class="hip-dot-container">
+          <div class="hip-crosshair h"></div>
+          <div class="hip-crosshair v"></div>
+          <div class="hip-ring inner"></div>
+          <div class="hip-ring outer"></div>
+          <div class="hip-dot" id="hip-dot"></div>
+        </div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>Roll / Pitch — real-time</h2>
+    <!-- Right top: Chart -->
+    <div class="card chart-card">
+      <div class="card-label">Roll / Pitch — Time Series</div>
       <div class="chart-wrap">
         <canvas id="chart"></canvas>
       </div>
     </div>
+
+    <!-- Right bottom: Session controls -->
+    <div class="card session-card">
+      <div class="card-label">Session</div>
+      <button class="btn btn-start" id="btn-rec" onclick="toggleRecording()">Start Recording</button>
+      <button class="btn btn-download" id="btn-dl" onclick="downloadCSV()" disabled>Download CSV</button>
+      <div class="session-stats">
+        <div class="stat-item">
+          <div class="stat-label">Duration</div>
+          <div class="stat-val" id="s-dur">00:00</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Samples</div>
+          <div class="stat-val" id="s-cnt">0</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Max Dev</div>
+          <div class="stat-val" id="s-max">--</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label">Alerts</div>
+          <div class="stat-val" id="s-alerts" style="color:var(--red)">0</div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="status">
+  <div class="status-bar">
     <span class="status-dot" id="status-dot"></span>
-    <span id="status-text">Connecting…</span>
+    <span id="status-text">Connecting...</span>
   </div>
 
   <script>
-    const MAX_POINTS = 120;
-    const dataRoll = [];
-    const dataPitch = [];
+    // ---- Config ----
+    const MAX_POINTS = 200;
+    const POLL_MS = 50;
+    const THRESHOLD_WARN = 15;
+    const THRESHOLD_ALERT = 20;
 
-    function pushSample(roll, pitch) {
-      if (roll == null || pitch == null) return;
-      dataRoll.push(roll);
-      dataPitch.push(pitch);
-      if (dataRoll.length > MAX_POINTS) {
-        dataRoll.shift();
-        dataPitch.shift();
-      }
+    // ---- Chart data ----
+    const dataRoll = [], dataPitch = [], dataLabels = [];
+    let sampleIndex = 0;
+
+    // ---- Baseline (captured from first N samples or via calibration) ----
+    let baselineRoll = null, baselinePitch = null;
+    const BASELINE_SAMPLES = 40;
+    let baselineBuf = [];
+
+    // ---- Session recording ----
+    let recording = false;
+    let recStart = null;
+    let recData = [];  // [{t, roll, pitch, dev}]
+    let recTimer = null;
+    let maxDev = 0;
+    let alertCount = 0;
+    let lastAlertState = false;
+
+    // ---- Gauge ----
+    function drawGaugeBg() {
+      const c = document.getElementById('gauge-bg');
+      const ctx = c.getContext('2d');
+      const cx = 110, cy = 110, r = 95;
+      const startAngle = 0.75 * Math.PI;
+      const endAngle = 2.25 * Math.PI;
+      const totalArc = endAngle - startAngle;
+
+      ctx.clearRect(0, 0, 220, 220);
+      ctx.lineWidth = 10;
+      ctx.lineCap = 'round';
+
+      // Green zone: 0-15 deg  (0-33% of 45-deg range)
+      const g = startAngle + totalArc * (15 / 45);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, startAngle, g);
+      ctx.strokeStyle = 'rgba(52,211,153,0.2)';
+      ctx.stroke();
+
+      // Yellow zone: 15-20 deg
+      const y = startAngle + totalArc * (20 / 45);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, g, y);
+      ctx.strokeStyle = 'rgba(251,191,36,0.2)';
+      ctx.stroke();
+
+      // Red zone: 20-45 deg
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, y, endAngle);
+      ctx.strokeStyle = 'rgba(248,113,113,0.2)';
+      ctx.stroke();
     }
 
-    const ctx = document.getElementById('chart').getContext('2d');
-    const chart = new Chart(ctx, {
+    function drawGaugeFg(dev) {
+      const c = document.getElementById('gauge-fg');
+      const ctx = c.getContext('2d');
+      const cx = 110, cy = 110, r = 95;
+      const startAngle = 0.75 * Math.PI;
+      const endAngle = 2.25 * Math.PI;
+      const totalArc = endAngle - startAngle;
+
+      ctx.clearRect(0, 0, 220, 220);
+      if (dev == null) return;
+
+      const clamped = Math.min(Math.max(dev, 0), 45);
+      const angle = startAngle + totalArc * (clamped / 45);
+
+      let color;
+      if (dev < THRESHOLD_WARN) color = 'rgb(52,211,153)';
+      else if (dev < THRESHOLD_ALERT) color = 'rgb(251,191,36)';
+      else color = 'rgb(248,113,113)';
+
+      ctx.lineWidth = 10;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, startAngle, angle);
+      ctx.strokeStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 15;
+      ctx.stroke();
+    }
+
+    drawGaugeBg();
+
+    // ---- Chart ----
+    const chart = new Chart(document.getElementById('chart').getContext('2d'), {
       type: 'line',
       data: {
-        labels: [],
+        labels: dataLabels,
         datasets: [
-          { label: 'Roll (°)', data: dataRoll, borderColor: '#f472b6', backgroundColor: 'rgba(244, 114, 182, 0.1)', fill: true, tension: 0.2, pointRadius: 0 },
-          { label: 'Pitch (°)', data: dataPitch, borderColor: '#a78bfa', backgroundColor: 'rgba(167, 139, 250, 0.1)', fill: true, tension: 0.2, pointRadius: 0 }
+          {
+            label: 'Roll',
+            data: dataRoll,
+            borderColor: '#f472b6',
+            backgroundColor: 'rgba(244,114,182,0.08)',
+            fill: true,
+            tension: 0.25,
+            pointRadius: 0,
+            borderWidth: 2
+          },
+          {
+            label: 'Pitch',
+            data: dataPitch,
+            borderColor: '#818cf8',
+            backgroundColor: 'rgba(129,140,248,0.08)',
+            fill: true,
+            tension: 0.25,
+            pointRadius: 0,
+            borderWidth: 2
+          }
         ]
       },
       options: {
@@ -199,40 +456,121 @@
         scales: {
           x: {
             display: true,
-            grid: { color: 'rgba(42, 49, 66, 0.6)' },
-            ticks: { color: '#7a8299', maxTicksLimit: 8 }
+            grid: { color: 'rgba(37,43,59,0.6)' },
+            ticks: { color: '#6b7394', maxTicksLimit: 6, font: { size: 10 } }
           },
           y: {
             display: true,
-            grid: { color: 'rgba(42, 49, 66, 0.6)' },
-            ticks: { color: '#7a8299' },
-            min: -180,
-            max: 180
+            grid: { color: 'rgba(37,43,59,0.6)' },
+            ticks: { color: '#6b7394', font: { size: 10 } },
+            min: -90,
+            max: 90
           }
         },
         plugins: {
-          legend: {
-            labels: { color: '#e6e9f0', usePointStyle: true }
+          legend: { labels: { color: '#e6e9f0', usePointStyle: true, pointStyle: 'circle', font: { size: 11 } } },
+          annotation: {
+            annotations: {
+              threshHi: { type: 'line', yMin: THRESHOLD_ALERT, yMax: THRESHOLD_ALERT, borderColor: 'rgba(248,113,113,0.35)', borderWidth: 1, borderDash: [6, 4] },
+              threshLo: { type: 'line', yMin: -THRESHOLD_ALERT, yMax: -THRESHOLD_ALERT, borderColor: 'rgba(248,113,113,0.35)', borderWidth: 1, borderDash: [6, 4] }
+            }
           }
         }
       }
     });
 
-    function format(v) {
-      if (v == null || Number.isNaN(v)) return '—';
-      return v.toFixed(3);
+    // ---- Helpers ----
+    function fmt(v) { return v == null || isNaN(v) ? '--' : v.toFixed(1); }
+
+    function updateHipDot(roll, pitch) {
+      const dot = document.getElementById('hip-dot');
+      if (roll == null || pitch == null) return;
+      // Map roll/pitch to position within 160px container, clamp to circle
+      const maxDeg = 40;
+      const pxRange = 65; // radius in px
+      let dx = Math.max(-maxDeg, Math.min(maxDeg, roll));
+      let dy = Math.max(-maxDeg, Math.min(maxDeg, pitch));
+      let px = (dx / maxDeg) * pxRange;
+      let py = -(dy / maxDeg) * pxRange; // invert Y
+
+      // Clamp to circle
+      const dist = Math.sqrt(px * px + py * py);
+      if (dist > pxRange) { px = (px / dist) * pxRange; py = (py / dist) * pxRange; }
+
+      dot.style.left = `calc(50% + ${px}px)`;
+      dot.style.top = `calc(50% + ${py}px)`;
+
+      // Color based on deviation
+      const dev = Math.sqrt(roll * roll + pitch * pitch);
+      if (dev < THRESHOLD_WARN) {
+        dot.style.background = 'var(--green)';
+        dot.style.boxShadow = '0 0 12px rgba(52,211,153,0.6)';
+      } else if (dev < THRESHOLD_ALERT) {
+        dot.style.background = 'var(--yellow)';
+        dot.style.boxShadow = '0 0 12px rgba(251,191,36,0.6)';
+      } else {
+        dot.style.background = 'var(--red)';
+        dot.style.boxShadow = '0 0 12px rgba(248,113,113,0.6)';
+      }
     }
 
-    function updateUI(data) {
-      if (!data || !data.attitude) return;
-      const a = data.attitude;
-      document.getElementById('roll').textContent = format(a.roll);
-      document.getElementById('pitch').textContent = format(a.pitch);
-      pushSample(a.roll, a.pitch);
-      chart.data.labels = dataRoll.map((_, i) => i);
-      chart.update('none');
+    function computeDeviation(roll, pitch) {
+      if (baselineRoll == null) return null;
+      const dr = roll - baselineRoll;
+      const dp = pitch - baselinePitch;
+      return Math.sqrt(dr * dr + dp * dp);
     }
 
+    // ---- Recording ----
+    function toggleRecording() {
+      if (!recording) {
+        recording = true;
+        recStart = Date.now();
+        recData = [];
+        maxDev = 0;
+        alertCount = 0;
+        lastAlertState = false;
+        document.getElementById('btn-rec').textContent = 'Stop Recording';
+        document.getElementById('btn-rec').className = 'btn btn-stop';
+        document.getElementById('btn-dl').disabled = true;
+        document.getElementById('s-max').textContent = '--';
+        document.getElementById('s-alerts').textContent = '0';
+        recTimer = setInterval(updateTimer, 500);
+      } else {
+        recording = false;
+        document.getElementById('btn-rec').textContent = 'Start Recording';
+        document.getElementById('btn-rec').className = 'btn btn-start';
+        document.getElementById('btn-dl').disabled = recData.length === 0;
+        clearInterval(recTimer);
+      }
+    }
+
+    function updateTimer() {
+      if (!recStart) return;
+      const s = Math.floor((Date.now() - recStart) / 1000);
+      const m = Math.floor(s / 60);
+      document.getElementById('s-dur').textContent =
+        String(m).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+    }
+
+    function downloadCSV() {
+      if (recData.length === 0) return;
+      let csv = 'timestamp_ms,elapsed_s,roll_deg,pitch_deg,deviation_deg\n';
+      const t0 = recData[0].t;
+      for (const r of recData) {
+        csv += `${r.t},${((r.t - t0) / 1000).toFixed(3)},${r.roll.toFixed(3)},${r.pitch.toFixed(3)},${r.dev.toFixed(3)}\n`;
+      }
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const ts = new Date(recData[0].t).toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      a.href = url;
+      a.download = `climb-session-${ts}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // ---- Main poll loop ----
     let lastOk = false;
 
     async function poll() {
@@ -240,16 +578,85 @@
         const res = await fetch('/api/sensor');
         if (!res.ok) throw new Error(res.statusText);
         const data = await res.json();
-        updateUI(data);
+        const a = data.attitude;
+        if (!a) throw new Error('no attitude data');
+
+        const roll = a.roll, pitch = a.pitch;
+
+        // Baseline capture
+        if (baselineRoll == null) {
+          baselineBuf.push({ roll, pitch });
+          if (baselineBuf.length >= BASELINE_SAMPLES) {
+            baselineRoll = baselineBuf.reduce((s, b) => s + b.roll, 0) / baselineBuf.length;
+            baselinePitch = baselineBuf.reduce((s, b) => s + b.pitch, 0) / baselineBuf.length;
+          }
+        }
+
+        // Deviation
+        const dev = computeDeviation(roll, pitch);
+
+        // Update displays
+        document.getElementById('roll-val').textContent = fmt(roll) + '\u00B0';
+        document.getElementById('pitch-val').textContent = fmt(pitch) + '\u00B0';
+
+        if (dev != null) {
+          document.getElementById('dev-value').textContent = fmt(dev);
+          drawGaugeFg(dev);
+          if (dev < THRESHOLD_WARN) {
+            document.getElementById('dev-status').textContent = 'Good position';
+            document.getElementById('dev-status').style.color = 'var(--green)';
+          } else if (dev < THRESHOLD_ALERT) {
+            document.getElementById('dev-status').textContent = 'Watch posture';
+            document.getElementById('dev-status').style.color = 'var(--yellow)';
+          } else {
+            document.getElementById('dev-status').textContent = 'Hip drop!';
+            document.getElementById('dev-status').style.color = 'var(--red)';
+          }
+        }
+
+        // Hip dot uses relative values from baseline
+        const relRoll = baselineRoll != null ? roll - baselineRoll : roll;
+        const relPitch = baselinePitch != null ? pitch - baselinePitch : pitch;
+        updateHipDot(relRoll, relPitch);
+
+        // Chart
+        dataRoll.push(roll);
+        dataPitch.push(pitch);
+        sampleIndex++;
+        const elapsed = (sampleIndex * POLL_MS / 1000).toFixed(1);
+        dataLabels.push(elapsed + 's');
+        if (dataRoll.length > MAX_POINTS) {
+          dataRoll.shift();
+          dataPitch.shift();
+          dataLabels.shift();
+        }
+        chart.update('none');
+
+        // Recording
+        if (recording) {
+          const devVal = dev != null ? dev : 0;
+          recData.push({ t: Date.now(), roll, pitch, dev: devVal });
+          document.getElementById('s-cnt').textContent = recData.length;
+          if (devVal > maxDev) {
+            maxDev = devVal;
+            document.getElementById('s-max').textContent = fmt(maxDev) + '\u00B0';
+          }
+          const isAlert = devVal >= THRESHOLD_ALERT;
+          if (isAlert && !lastAlertState) alertCount++;
+          lastAlertState = isAlert;
+          document.getElementById('s-alerts').textContent = alertCount;
+        }
+
+        // Status
         document.getElementById('status-dot').classList.add('live');
         document.getElementById('status-text').textContent = 'Live';
         lastOk = true;
       } catch (e) {
-        if (lastOk) document.getElementById('status-text').textContent = 'Connection lost — is the BLE central running?';
+        if (lastOk) document.getElementById('status-text').textContent = 'Connection lost';
         document.getElementById('status-dot').classList.remove('live');
         lastOk = false;
       }
-      setTimeout(poll, 50);
+      setTimeout(poll, POLL_MS);
     }
 
     poll();

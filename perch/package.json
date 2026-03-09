@@ -1,7 +1,9 @@
 {
   "dependencies": {
     "@abandonware/noble": "^1.9.2-15",
+    "@serialport/parser-readline": "^12.0.0",
     "ejs": "^3.1.8",
-    "express": "^4.18.1"
+    "express": "^4.18.1",
+    "serialport": "^12.0.0"
   }
 }
