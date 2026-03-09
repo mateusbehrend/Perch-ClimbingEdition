@@ -1,71 +1,87 @@
 #include <Arduino_LSM6DSOX.h>
+#include <MadgwickAHRS.h>
 
-// --- Complementary Filter Coefficient ---
-// 0.98 = trust gyro 98%, accel 2% (tune to your needs)
-const float alpha = 0.98;
+// =============================================================
+//  Madgwick-based Hip Drop Detector for Climbing
+//  Device is hip-mounted on a belt:
+//    Z-axis → straight out from the climber (forward)
+//    X-axis → horizontal (left/right)
+//    Y-axis → vertical (up/down)
+// =============================================================
+
+// --- Madgwick Filter ---
+Madgwick filter;
+const float SAMPLE_RATE = 50.0;  // Hz (match your loop timing)
 
 // --- Timing ---
-float imu_dt = 0.0;
 unsigned long lastTime = 0;
 
-// --- Angles ---
+// --- Orientation from filter ---
 float roll  = 0.0;  // rotation around X-axis (degrees)
 float pitch = 0.0;  // rotation around Y-axis (degrees)
+float yaw   = 0.0;  // rotation around Z-axis (degrees)
 
 // --- Calibration ---
 float baselineRoll  = 0.0;
-float basePitch     = 0.0;
+float baselinePitch = 0.0;
 bool  calibrated    = false;
 
-const int   CAL_SAMPLES  = 100;   // number of samples to average (~2 seconds)
-const float ALERT_THRESHOLD = 20.0; // degrees of deviation before alert
+const int CAL_SAMPLES = 100;  // ~2 seconds at 50 Hz
 
-// --- Run calibration: average CAL_SAMPLES readings ---
+// --- Hip Drop Detection (rolling-window debounce) ---
+const float ALERT_THRESHOLD = 20.0;  // degrees of deviation
+
+// Rolling window: 25 samples at 50 Hz = 0.5 seconds
+// Trigger when >= 20 of the last 25 samples exceed threshold (~80%)
+const int DEBOUNCE_WINDOW        = 25;
+const int DEBOUNCE_TRIGGER_COUNT = 20;
+
+bool  sampleBuffer[DEBOUNCE_WINDOW];  // circular buffer (true = above threshold)
+int   bufferIndex    = 0;              // current write position
+int   aboveCount     = 0;              // running count of 'true' entries
+bool  hipDropActive  = false;          // latched alert state
+
+// =============================================================
+//  Calibration: average orientation over CAL_SAMPLES readings
+// =============================================================
 void runCalibration() {
   Serial.println(">> Calibration started. Hold good position...");
-  delay(1000); // give the climber a moment to get set
+  delay(1000);
 
   float sumRoll = 0.0, sumPitch = 0.0;
   int   count   = 0;
 
   while (count < CAL_SAMPLES) {
-    float ax, ay, az, gx, gy, gz;
-
     if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
+      float ax, ay, az, gx, gy, gz;
       IMU.readAcceleration(ax, ay, az);
       IMU.readGyroscope(gx, gy, gz);
 
-      unsigned long now = micros();
-      imu_dt = (now - lastTime) / 1000000.0;
-      lastTime = now;
+      // Feed the Madgwick filter (6-DOF, no magnetometer)
+      filter.updateIMU(gx, gy, gz, ax, ay, az);
 
-      // Accelerometer angle estimates
-      float accelRoll  = atan2(ay, az) * RAD_TO_DEG;
-      float accelPitch = atan2(-ax, sqrt(ay*ay + az*az)) * RAD_TO_DEG;
-
-      // Complementary filter
-      roll  = alpha * (roll  + gx * imu_dt) + (1.0 - alpha) * accelRoll;
-      pitch = alpha * (pitch + gy * imu_dt) + (1.0 - alpha) * accelPitch;
-
-      sumRoll  += roll;
-      sumPitch += pitch;
+      sumRoll  += filter.getRoll();
+      sumPitch += filter.getPitch();
       count++;
 
-      delay(20); // ~50Hz during calibration
+      delay(20);  // ~50 Hz
     }
   }
 
-  baselineRoll = sumRoll  / CAL_SAMPLES;
-  basePitch    = sumPitch / CAL_SAMPLES;
-  calibrated   = true;
+  baselineRoll  = sumRoll  / CAL_SAMPLES;
+  baselinePitch = sumPitch / CAL_SAMPLES;
+  calibrated    = true;
 
-  Serial.print(">> Calibration complete! Baseline Roll: ");
+  Serial.print(">> Calibration complete!  Baseline Roll: ");
   Serial.print(baselineRoll, 1);
   Serial.print("°  |  Baseline Pitch: ");
-  Serial.print(basePitch, 1);
+  Serial.print(baselinePitch, 1);
   Serial.println("°");
 }
 
+// =============================================================
+//  Setup
+// =============================================================
 void setup() {
   Serial.begin(115200);
   while (!Serial);
@@ -75,62 +91,77 @@ void setup() {
     while (1);
   }
 
-  Serial.println("IMU initialized.");
+  Serial.println("IMU initialized (Madgwick filter).");
 
+  filter.begin(SAMPLE_RATE);
   lastTime = micros();
 
-  // Run calibration once at startup
+  // run calibration once during setup
   runCalibration();
 }
 
+// =============================================================
+//  Main loop
+// =============================================================
 void loop() {
-  float ax, ay, az;   // Accelerometer (g)
-  float gx, gy, gz;   // Gyroscope (degrees/sec)
-
   if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
 
     // --- Read sensors ---
+    float ax, ay, az, gx, gy, gz;
     IMU.readAcceleration(ax, ay, az);
     IMU.readGyroscope(gx, gy, gz);
 
-    // --- Compute delta time in seconds ---
-    unsigned long now = micros();
-    imu_dt = (now - lastTime) / 1000000.0;
-    lastTime = now;
+    // --- Update Madgwick filter ---
+    filter.updateIMU(gx, gy, gz, ax, ay, az);
 
-    // --- Accelerometer-based angle estimates ---
-    float accelRoll  = atan2(ay, az) * RAD_TO_DEG;
-    float accelPitch = atan2(-ax, sqrt(ay * ay + az * az)) * RAD_TO_DEG;
+    roll  = filter.getRoll();
+    pitch = filter.getPitch();
+    yaw   = filter.getYaw();
 
-    // --- Complementary Filter ---
-    roll  = alpha * (roll  + gx * imu_dt) + (1.0 - alpha) * accelRoll;
-    pitch = alpha * (pitch + gy * imu_dt) + (1.0 - alpha) * accelPitch;
-
-    // --- Output to Serial ---
+    // --- Output orientation ---
     Serial.print("Roll: ");
     Serial.print(roll, 1);
     Serial.print("°  |  Pitch: ");
     Serial.print(pitch, 1);
+    Serial.print("°  |  Yaw: ");
+    Serial.print(yaw, 1);
     Serial.print("°");
 
-    // --- Deviation from baseline (if calibrated) ---
+    // --- Hip drop detection with rolling-window debounce ---
     if (calibrated) {
       float deltaRoll  = roll  - baselineRoll;
-      float deltaPitch = pitch - basePitch;
+      float deltaPitch = pitch - baselinePitch;
       float deviation  = sqrt(deltaRoll * deltaRoll + deltaPitch * deltaPitch);
 
-      Serial.print("  |  Deviation: ");
+      Serial.print("  |  Dev: ");
       Serial.print(deviation, 1);
       Serial.print("°");
 
-      if (deviation > ALERT_THRESHOLD) {
+      // Determine if this sample is above threshold
+      bool aboveNow = (deviation > ALERT_THRESHOLD);
+
+      // Update the rolling window: subtract the old sample, add the new one
+      if (sampleBuffer[bufferIndex]) aboveCount--;
+      sampleBuffer[bufferIndex] = aboveNow;
+      if (aboveNow) aboveCount++;
+      bufferIndex = (bufferIndex + 1) % DEBOUNCE_WINDOW;
+
+      // Trigger alert when enough samples in the window exceeded threshold
+      if (aboveCount >= DEBOUNCE_TRIGGER_COUNT) {
+        hipDropActive = true;
         Serial.print("  *** HIP DROP ALERT ***");
+      } else if (hipDropActive) {
+        // Cleared: majority of window is now below threshold
+        hipDropActive = false;
+        Serial.print("  (hip drop cleared)");
+      } else {
+        Serial.print("  (no hip drop)");
       }
     }
 
     Serial.println();
-    delay(200); // 5 updates per second
+    delay(20);  // ~50 Hz to match SAMPLE_RATE
   }
 
-  delay(10);
+  delay(1);
 }
