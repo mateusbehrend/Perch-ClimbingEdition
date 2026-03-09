@@ -1,5 +1,5 @@
 #include <Arduino_LSM6DSOX.h>
-#include <MadgwickAHRS.h>
+#include "MadgwickFilter.h"
 
 // =============================================================
 //  Madgwick-based Hip Drop Detector for Climbing
@@ -9,19 +9,19 @@
 //    Y-axis → vertical (up/down)
 // =============================================================
 
-// --- Madgwick Filter (for smooth orientation display) ---
-Madgwick filter;
+// --- Madgwick Filter ---
+MadgwickFilter filter;
 const float SAMPLE_RATE = 100.0;  // Hz (match your loop timing)
 
 // --- Timing ---
 unsigned long lastTime = 0;
 
-// --- Orientation from filter (for display) ---
+// --- Orientation from filter ---
 float roll  = 0.0;
 float pitch = 0.0;
 float yaw   = 0.0;
 
-// --- Calibration (accelerometer-based, instant at any angle) ---
+// --- Calibration ---
 float baselineRoll  = 0.0;
 float baselinePitch = 0.0;
 bool  calibrated    = false;
@@ -42,25 +42,13 @@ int   aboveCount     = 0;              // running count of 'true' entries
 bool  hipDropActive  = false;          // latched alert state
 
 // =============================================================
-//  Helper: compute roll/pitch directly from accelerometer
-//  This works instantly at any angle — no filter convergence needed.
-// =============================================================
-float accelRoll(float ax, float ay, float az) {
-  return atan2(ay, az) * RAD_TO_DEG;
-}
-
-float accelPitch(float ax, float ay, float az) {
-  return atan2(-ax, sqrt(ay * ay + az * az)) * RAD_TO_DEG;
-}
-
-// =============================================================
-//  Calibration: baseline from accelerometer, then warm up filter
+//  Calibration
 // =============================================================
 void runCalibration() {
   Serial.println(">> Calibration started. Hold good position...");
   delay(1000);
 
-  // --- Compute baseline directly from accelerometer ---
+  // --- Compute baseline from accelerometer (instant, any angle) ---
   Serial.println(">> Capturing baseline from accelerometer...");
   float sumRoll = 0.0, sumPitch = 0.0;
   int count = 0;
@@ -70,8 +58,8 @@ void runCalibration() {
       float ax, ay, az;
       IMU.readAcceleration(ax, ay, az);
 
-      sumRoll  += accelRoll(ax, ay, az);
-      sumPitch += accelPitch(ax, ay, az);
+      sumRoll  += atan2(ay, az) * RAD_TO_DEG;
+      sumPitch += atan2(-ax, sqrt(ay * ay + az * az)) * RAD_TO_DEG;
       count++;
 
       delay(10);
@@ -82,21 +70,25 @@ void runCalibration() {
   baselinePitch = sumPitch / CAL_SAMPLES;
   calibrated    = true;
 
-  Serial.print(">> Calibration complete!  Baseline Roll: ");
+  Serial.print(">> Baseline Roll: ");
   Serial.print(baselineRoll, 1);
   Serial.print("°  |  Baseline Pitch: ");
   Serial.print(baselinePitch, 1);
   Serial.println("°");
 
-  // --- Warm up the Madgwick filter for display purposes ---
-  // The filter may take a while to converge, but that's OK —
-  // hip drop detection uses the accelerometer, not the filter.
-  Serial.println(">> Warming up Madgwick filter for display...");
+  // --- Pre-seed the Madgwick filter so it starts at the right angle ---
+  Serial.println(">> Seeding and stabilizing filter...");
+  while (!IMU.accelerationAvailable()) { delay(1); }
+  float ax, ay, az;
+  IMU.readAcceleration(ax, ay, az);
   filter.begin(SAMPLE_RATE);
+  filter.setFromAccelerometer(ax, ay, az);
+
+  // Brief stabilization (~1 second)
   int warmup = 0;
-  while (warmup < 200) {
+  while (warmup < 100) {
     if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
-      float ax, ay, az, gx, gy, gz;
+      float gx, gy, gz;
       IMU.readAcceleration(ax, ay, az);
       IMU.readGyroscope(gx, gy, gz);
       filter.updateIMU(gx, gy, gz, ax, ay, az);
@@ -104,7 +96,8 @@ void runCalibration() {
       delay(10);
     }
   }
-  Serial.println(">> Ready.");
+
+  Serial.println(">> Calibration complete. Ready.");
 }
 
 // =============================================================
@@ -138,14 +131,14 @@ void loop() {
     IMU.readAcceleration(ax, ay, az);
     IMU.readGyroscope(gx, gy, gz);
 
-    // --- Update Madgwick filter (for smooth display) ---
+    // --- Update Madgwick filter ---
     filter.updateIMU(gx, gy, gz, ax, ay, az);
 
     roll  = filter.getRoll();
     pitch = filter.getPitch();
     yaw   = filter.getYaw();
 
-    // --- Output orientation from Madgwick (smooth display) ---
+    // --- Output orientation ---
     Serial.print("Roll: ");
     Serial.print(roll, 1);
     Serial.print("°  |  Pitch: ");
@@ -154,15 +147,10 @@ void loop() {
     Serial.print(yaw, 1);
     Serial.print("°");
 
-    // --- Hip drop detection using accelerometer angles ---
-    // Uses the same atan2 method as calibration, so baseline
-    // and real-time readings are always consistent.
+    // --- Hip drop detection with rolling-window debounce ---
     if (calibrated) {
-      float currentRoll  = accelRoll(ax, ay, az);
-      float currentPitch = accelPitch(ax, ay, az);
-
-      float deltaRoll  = currentRoll  - baselineRoll;
-      float deltaPitch = currentPitch - baselinePitch;
+      float deltaRoll  = roll  - baselineRoll;
+      float deltaPitch = pitch - baselinePitch;
       float deviation  = sqrt(deltaRoll * deltaRoll + deltaPitch * deltaPitch);
 
       Serial.print("  |  Dev: ");
