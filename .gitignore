@@ -1,0 +1,60 @@
+########################
+# OS / system files
+########################
+.DS_Store
+Thumbs.db
+
+########################
+# Node / npm (perch/)
+########################
+node_modules/
+perch/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+########################
+# Dependency / package managers
+########################
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+########################
+# Build / coverage outputs
+########################
+dist/
+build/
+coverage/
+.nyc_output/
+
+########################
+# Logs and temp files
+########################
+logs/
+*.log
+*.tmp
+*.temp
+
+########################
+# Environment / secrets
+########################
+.env
+.env.*
+
+########################
+# Editor / IDE
+########################
+.vscode/
+.idea/
+*.swp
+*.swo
+
+########################
+# Arduino / firmware artifacts
+########################
+*.hex
+*.elf
+*.bin
+*.map

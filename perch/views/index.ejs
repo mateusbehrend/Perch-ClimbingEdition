@@ -1,0 +1,258 @@
+<!-- This is mostly created with the help of Cursor -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Orientation Dashboard — BLE roll &amp; pitch</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d0f14;
+      --surface: #161a22;
+      --border: #2a3142;
+      --text: #e6e9f0;
+      --muted: #7a8299;
+      --accel: #6ee7b7;
+      --x: #f472b6;
+      --y: #a78bfa;
+      --z: #34d399;
+      --glow-accel: rgba(110, 231, 183, 0.15);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    h1 {
+      font-weight: 600;
+      font-size: 1.5rem;
+      letter-spacing: 0.02em;
+      margin-bottom: 0.25rem;
+    }
+
+    .subtitle {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 1.5rem;
+    }
+
+    .layout {
+      width: 100%;
+      max-width: 800px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accel), transparent);
+      box-shadow: 0 0 20px var(--glow-accel);
+    }
+
+    .card h2 {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin: 0 0 1rem 0;
+      color: var(--accel);
+    }
+
+    .values {
+      display: flex;
+      gap: 2rem;
+      flex-wrap: wrap;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .axis { font-size: 0.9rem; color: var(--muted); }
+    .value { font-size: 1.1rem; font-weight: 600; min-width: 6ch; text-align: right; color: var(--accel); }
+    .row.x .value { color: var(--x); }
+    .row.y .value { color: var(--y); }
+    .row.z .value { color: var(--z); }
+    .unit { font-size: 0.7rem; color: var(--muted); }
+
+    .chart-wrap {
+      position: relative;
+      height: 260px;
+      width: 100%;
+    }
+
+    .status {
+      margin-top: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    .status-dot.live {
+      background: var(--accel);
+      box-shadow: 0 0 8px var(--accel);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Orientation Dashboard</h1>
+  <p class="subtitle">Arduino Nano 2040 · Roll &amp; pitch via BLE</p>
+
+  <div class="layout">
+    <div class="card">
+      <h2>Orientation (degrees)</h2>
+      <div class="values">
+        <div class="row x"><span class="axis">Roll</span><span class="value" id="roll">—</span><span class="unit">°</span></div>
+        <div class="row y"><span class="axis">Pitch</span><span class="value" id="pitch">—</span><span class="unit">°</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Roll / Pitch — real-time</h2>
+      <div class="chart-wrap">
+        <canvas id="chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="status">
+    <span class="status-dot" id="status-dot"></span>
+    <span id="status-text">Connecting…</span>
+  </div>
+
+  <script>
+    const MAX_POINTS = 120;
+    const dataRoll = [];
+    const dataPitch = [];
+
+    function pushSample(roll, pitch) {
+      if (roll == null || pitch == null) return;
+      dataRoll.push(roll);
+      dataPitch.push(pitch);
+      if (dataRoll.length > MAX_POINTS) {
+        dataRoll.shift();
+        dataPitch.shift();
+      }
+    }
+
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          { label: 'Roll (°)', data: dataRoll, borderColor: '#f472b6', backgroundColor: 'rgba(244, 114, 182, 0.1)', fill: true, tension: 0.2, pointRadius: 0 },
+          { label: 'Pitch (°)', data: dataPitch, borderColor: '#a78bfa', backgroundColor: 'rgba(167, 139, 250, 0.1)', fill: true, tension: 0.2, pointRadius: 0 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { intersect: false, mode: 'index' },
+        scales: {
+          x: {
+            display: true,
+            grid: { color: 'rgba(42, 49, 66, 0.6)' },
+            ticks: { color: '#7a8299', maxTicksLimit: 8 }
+          },
+          y: {
+            display: true,
+            grid: { color: 'rgba(42, 49, 66, 0.6)' },
+            ticks: { color: '#7a8299' },
+            min: -180,
+            max: 180
+          }
+        },
+        plugins: {
+          legend: {
+            labels: { color: '#e6e9f0', usePointStyle: true }
+          }
+        }
+      }
+    });
+
+    function format(v) {
+      if (v == null || Number.isNaN(v)) return '—';
+      return v.toFixed(3);
+    }
+
+    function updateUI(data) {
+      if (!data || !data.attitude) return;
+      const a = data.attitude;
+      document.getElementById('roll').textContent = format(a.roll);
+      document.getElementById('pitch').textContent = format(a.pitch);
+      pushSample(a.roll, a.pitch);
+      chart.data.labels = dataRoll.map((_, i) => i);
+      chart.update('none');
+    }
+
+    let lastOk = false;
+
+    async function poll() {
+      try {
+        const res = await fetch('/api/sensor');
+        if (!res.ok) throw new Error(res.statusText);
+        const data = await res.json();
+        updateUI(data);
+        document.getElementById('status-dot').classList.add('live');
+        document.getElementById('status-text').textContent = 'Live';
+        lastOk = true;
+      } catch (e) {
+        if (lastOk) document.getElementById('status-text').textContent = 'Connection lost — is the BLE central running?';
+        document.getElementById('status-dot').classList.remove('live');
+        lastOk = false;
+      }
+      setTimeout(poll, 50);
+    }
+
+    poll();
+  </script>
+</body>
+</html>
