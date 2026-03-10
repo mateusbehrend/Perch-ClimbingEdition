@@ -60,6 +60,9 @@ int   bufferIndex    = 0;              // current write position
 int   aboveCount     = 0;              // running count of 'true' entries
 bool  hipDropActive  = false;          // latched alert state
 
+const unsigned long MIN_ALERT_HOLD_MS = 250;  // alert stays on for at least 0.25 seconds
+unsigned long alertStartTime = 0;               // when alert was first triggered
+
 // =============================================================
 //  Calibration
 // =============================================================
@@ -198,11 +201,17 @@ void loop() {
       if (aboveNow) aboveCount++;
       bufferIndex = (bufferIndex + 1) % DEBOUNCE_WINDOW;
 
-      // Trigger alert when enough samples in the window exceeded threshold
+      // Trigger/clear alert with minimum hold time
       if (aboveCount >= DEBOUNCE_TRIGGER_COUNT) {
+        if (!hipDropActive) {
+          alertStartTime = millis();  // record when alert first triggered
+        }
         hipDropActive = true;
       } else if (hipDropActive) {
-        hipDropActive = false;
+        // Only clear if the minimum hold time has elapsed
+        if (millis() - alertStartTime >= MIN_ALERT_HOLD_MS) {
+          hipDropActive = false;
+        }
       }
     }
 
