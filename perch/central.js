@@ -90,6 +90,10 @@ app.get('/', (req, res) => {
     res.render('index');
 });
 
+app.get('/replay', (req, res) => {
+    res.render('replay');
+});
+
 app.get('/api/sensor', (req, res) => {
     res.set('Content-Type', 'application/json');
     res.json(sensorData);

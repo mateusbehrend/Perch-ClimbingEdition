@@ -250,7 +250,7 @@
 <body>
   <div class="header">
     <h1>Perch — Hip Position Monitor</h1>
-    <div class="sub">Climbing session tracker &middot; Roll &amp; Pitch via BLE</div>
+    <div class="sub">Climbing session tracker &middot; Roll &amp; Pitch via BLE &middot; <a href="/replay" style="color:#60a5fa;text-decoration:none;font-size:0.8rem;">Session Replay</a></div>
   </div>
 
   <div class="grid">
@@ -334,8 +334,8 @@
     // ---- Config ----
     const MAX_POINTS = 200;
     const POLL_MS = 50;
-    const THRESHOLD_WARN = 15;
-    const THRESHOLD_ALERT = 20;
+    const THRESHOLD_WARN = 20;
+    const THRESHOLD_ALERT = 25;
 
     // ---- Chart data ----
     const dataRoll = [], dataPitch = [], dataLabels = [];
@@ -363,15 +363,15 @@
       ctx.lineWidth = 10;
       ctx.lineCap = 'round';
 
-      // Green zone: 0-15 deg  (0-33% of 45-deg range)
+      // Green zone: 0-25 deg
       const g = startAngle + totalArc * (15 / 45);
       ctx.beginPath();
       ctx.arc(cx, cy, r, startAngle, g);
       ctx.strokeStyle = 'rgba(52,211,153,0.2)';
       ctx.stroke();
 
-      // Yellow zone: 15-20 deg
-      const y = startAngle + totalArc * (20 / 45);
+      // Yellow zone: 25-35 deg
+      const y = startAngle + totalArc * (25 / 45);
       ctx.beginPath();
       ctx.arc(cx, cy, r, g, y);
       ctx.strokeStyle = 'rgba(251,191,36,0.2)';

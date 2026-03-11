@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perch — Session Replay</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+  <style>
+    :root {
+      --bg: #0a0c10;
+      --surface: #13161d;
+      --surface2: #1a1e28;
+      --border: #252b3b;
+      --text: #e6e9f0;
+      --muted: #6b7394;
+      --roll: #f472b6;
+      --pitch: #818cf8;
+      --green: #34d399;
+      --yellow: #fbbf24;
+      --red: #f87171;
+      --accent: #60a5fa;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      padding: 1.5rem;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: 0.03em; }
+    .header .sub { font-size: 0.8rem; color: var(--muted); margin-top: 0.25rem; }
+    .header .nav-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.8rem;
+    }
+    .header .nav-link:hover { text-decoration: underline; }
+
+    /* ---- Upload area ---- */
+    .upload-area {
+      max-width: 1100px;
+      margin: 0 auto 1.5rem;
+      border: 2px dashed var(--border);
+      border-radius: 14px;
+      padding: 3rem 2rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: var(--surface);
+    }
+    .upload-area:hover, .upload-area.dragover {
+      border-color: var(--accent);
+      background: rgba(96, 165, 250, 0.05);
+    }
+    .upload-area h2 { font-size: 1.1rem; margin-bottom: 0.5rem; }
+    .upload-area p { font-size: 0.8rem; color: var(--muted); }
+    .upload-area input[type="file"] { display: none; }
+
+    /* ---- Main layout ---- */
+    .main-content { display: none; max-width: 1100px; margin: 0 auto; }
+    .main-content.visible { display: block; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.25rem;
+    }
+    .card-label {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin-bottom: 1rem;
+    }
+
+    /* ---- Session info bar ---- */
+    .session-info {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+    .session-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+      flex-shrink: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .session-meta {
+      display: flex;
+      gap: 1.5rem;
+      margin-left: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+    }
+    .meta-item .meta-label {
+      font-size: 0.6rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .meta-item .meta-val { margin-top: 0.1rem; }
+
+    /* ---- Grid ---- */
+    .grid {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    /* ---- Gauge ---- */
+    .gauge-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .gauge-container {
+      position: relative;
+      width: 220px;
+      height: 220px;
+    }
+    .gauge-bg, .gauge-fg {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+    .gauge-center {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+    .gauge-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 2rem;
+      font-weight: 600;
+      line-height: 1;
+    }
+    .gauge-unit { font-size: 0.7rem; color: var(--muted); margin-top: 0.2rem; }
+    .gauge-label { font-size: 0.75rem; color: var(--muted); margin-top: 0.15rem; }
+
+    .values-row {
+      display: flex;
+      gap: 1.5rem;
+      margin-top: 1.25rem;
+      width: 100%;
+      justify-content: center;
+    }
+    .val-block { text-align: center; }
+    .val-block .label { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+    .val-block .num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-top: 0.15rem;
+    }
+    .val-block .num.roll-color { color: var(--roll); }
+    .val-block .num.pitch-color { color: var(--pitch); }
+
+    /* ---- Hip dot with trail ---- */
+    .hip-visual {
+      margin-top: 1.25rem;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .hip-dot-container {
+      position: relative;
+      width: 200px;
+      height: 200px;
+      border-radius: 50%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+    .hip-ring {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px dashed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+    }
+    .hip-ring.inner { width: 50%; height: 50%; border-color: rgba(52,211,153,0.3); }
+    .hip-ring.outer { width: 80%; height: 80%; border-color: rgba(251,191,36,0.25); }
+    .hip-crosshair { position: absolute; background: var(--border); }
+    .hip-crosshair.h { width: 100%; height: 1px; top: 50%; }
+    .hip-crosshair.v { height: 100%; width: 1px; left: 50%; }
+    .hip-trail-canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      border-radius: 50%;
+    }
+    .hip-dot {
+      position: absolute;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 12px rgba(52, 211, 153, 0.6);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 2;
+      transition: none;
+    }
+    .hip-axis-label {
+      position: absolute;
+      font-size: 0.55rem;
+      color: var(--muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .hip-axis-label.top { top: 4px; left: 50%; transform: translateX(-50%); }
+    .hip-axis-label.bottom { bottom: 4px; left: 50%; transform: translateX(-50%); }
+    .hip-axis-label.left { left: 6px; top: 50%; transform: translateY(-50%); }
+    .hip-axis-label.right { right: 6px; top: 50%; transform: translateY(-50%); }
+
+    /* ---- Chart ---- */
+    .chart-card { min-height: 0; }
+    .chart-wrap {
+      position: relative;
+      height: 280px;
+      width: 100%;
+    }
+
+    /* ---- Playback controls ---- */
+    .playback-card {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .playback-btns {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+    }
+
+    .pb-btn {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      width: 36px; height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 1rem;
+      transition: all 0.15s;
+    }
+    .pb-btn:hover { border-color: var(--muted); background: var(--border); }
+    .pb-btn.active { background: var(--accent); border-color: var(--accent); color: #0a0c10; }
+    .pb-btn svg { width: 16px; height: 16px; fill: currentColor; }
+
+    .speed-select {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.4rem 0.6rem;
+      cursor: pointer;
+    }
+    .speed-select:focus { outline: none; border-color: var(--accent); }
+
+    .scrubber-container {
+      flex: 1;
+      min-width: 200px;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .scrubber {
+      flex: 1;
+      -webkit-appearance: none;
+      appearance: none;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--surface2);
+      outline: none;
+      cursor: pointer;
+      position: relative;
+    }
+    .scrubber::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 8px rgba(96, 165, 250, 0.4);
+    }
+
+    .time-display {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+      white-space: nowrap;
+      min-width: 100px;
+      text-align: right;
+    }
+
+    /* ---- Stats summary ---- */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 1rem;
+    }
+    .stat-card {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 1rem;
+      text-align: center;
+    }
+    .stat-card .stat-title {
+      font-size: 0.6rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      margin-bottom: 0.5rem;
+    }
+    .stat-card .stat-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.3rem;
+      font-weight: 600;
+    }
+    .stat-card .stat-sub {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 0.2rem;
+    }
+
+    /* ---- Trail settings ---- */
+    .trail-controls {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      margin-top: 0.75rem;
+    }
+    .trail-controls label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      cursor: pointer;
+    }
+    .trail-controls input[type="checkbox"] {
+      accent-color: var(--accent);
+    }
+    .trail-controls select {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.7rem;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0.2rem 0.4rem;
+    }
+
+    /* ---- File list ---- */
+    .file-change {
+      margin-top: 0.75rem;
+      text-align: center;
+    }
+    .file-change button {
+      font-family: 'Outfit', sans-serif;
+      font-size: 0.75rem;
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 8px;
+      padding: 0.4rem 1rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .file-change button:hover { border-color: var(--muted); color: var(--text); }
+
+    /* ---- Keyboard hints ---- */
+    .kbd-hints {
+      max-width: 1100px;
+      margin: 1rem auto 0;
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    kbd {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1rem 0.35rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.65rem;
+    }
+
+    /* ---- Deviation heatmap bar ---- */
+    .heatmap-bar {
+      height: 20px;
+      border-radius: 4px;
+      margin-top: 0.5rem;
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+    }
+    .heatmap-bar canvas {
+      width: 100%;
+      height: 100%;
+      border-radius: 4px;
+    }
+    .heatmap-cursor {
+      position: absolute;
+      top: 0;
+      width: 2px;
+      height: 100%;
+      background: white;
+      pointer-events: none;
+    }
+
+    /* ---- Responsive ---- */
+    @media (max-width: 720px) {
+      .grid { grid-template-columns: 1fr; }
+      .session-meta { margin-left: 0; }
+      .scrubber-container { min-width: 150px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Perch — Session Replay</h1>
+    <div class="sub">Load a climbing session CSV to replay hip trajectory &middot; <a class="nav-link" href="/">Back to Live Monitor</a></div>
+  </div>
+
+  <!-- Upload area -->
+  <div class="upload-area" id="upload-area">
+    <h2>Load Session Data</h2>
+    <p>Drag & drop a CSV file here, or click to browse</p>
+    <p style="margin-top:0.5rem; font-size:0.7rem;">Supports format: timestamp_ms, elapsed_s, roll_deg, pitch_deg, deviation_deg, alert</p>
+    <input type="file" id="file-input" accept=".csv">
+  </div>
+
+  <!-- Main content (hidden until file loaded) -->
+  <div class="main-content" id="main-content">
+
+    <!-- Session info bar -->
+    <div class="card session-info" style="margin-bottom:1rem;">
+      <div class="session-name" id="session-name">--</div>
+      <div class="session-meta">
+        <div class="meta-item">
+          <div class="meta-label">Duration</div>
+          <div class="meta-val" id="total-dur">--</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Samples</div>
+          <div class="meta-val" id="total-samples">--</div>
+        </div>
+        <div class="meta-item">
+          <div class="meta-label">Avg Rate</div>
+          <div class="meta-val" id="avg-rate">--</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main grid -->
+    <div class="grid">
+      <!-- Left column: gauge + hip -->
+      <div class="card gauge-card">
+        <div class="card-label">Deviation from baseline</div>
+
+        <div class="gauge-container">
+          <canvas class="gauge-bg" id="gauge-bg" width="220" height="220"></canvas>
+          <canvas class="gauge-fg" id="gauge-fg" width="220" height="220"></canvas>
+          <div class="gauge-center">
+            <div class="gauge-value" id="dev-value">--</div>
+            <div class="gauge-unit">degrees</div>
+            <div class="gauge-label" id="dev-status">No data</div>
+          </div>
+        </div>
+
+        <div class="values-row">
+          <div class="val-block">
+            <div class="label">Roll</div>
+            <div class="num roll-color" id="roll-val">--</div>
+          </div>
+          <div class="val-block">
+            <div class="label">Pitch</div>
+            <div class="num pitch-color" id="pitch-val">--</div>
+          </div>
+        </div>
+
+        <div class="hip-visual">
+          <div class="card-label" style="margin-bottom:0.5rem">Hip Position</div>
+          <div class="hip-dot-container" id="hip-container">
+            <div class="hip-crosshair h"></div>
+            <div class="hip-crosshair v"></div>
+            <div class="hip-ring inner"></div>
+            <div class="hip-ring outer"></div>
+            <canvas class="hip-trail-canvas" id="hip-trail" width="200" height="200"></canvas>
+            <div class="hip-dot" id="hip-dot"></div>
+            <div class="hip-axis-label top">+P</div>
+            <div class="hip-axis-label bottom">-P</div>
+            <div class="hip-axis-label left">-R</div>
+            <div class="hip-axis-label right">+R</div>
+          </div>
+          <div class="trail-controls">
+            <label><input type="checkbox" id="show-trail" checked> Trail</label>
+            <label>Length:
+              <select id="trail-len">
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+                <option value="0">All</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right column: chart + heatmap -->
+      <div class="card chart-card">
+        <div class="card-label">Roll / Pitch / Deviation — Full Session</div>
+        <div class="chart-wrap">
+          <canvas id="chart"></canvas>
+        </div>
+        <div class="card-label" style="margin-top:1rem;">Deviation Heatmap</div>
+        <div class="heatmap-bar" id="heatmap-bar">
+          <canvas id="heatmap-canvas"></canvas>
+          <div class="heatmap-cursor" id="heatmap-cursor"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Playback controls -->
+    <div class="card playback-card" style="margin-bottom:1rem;">
+      <div class="playback-btns">
+        <button class="pb-btn" id="btn-skip-start" title="Skip to start">
+          <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z" transform="scale(-1,1) translate(-24,0)"/></svg>
+        </button>
+        <button class="pb-btn" id="btn-step-back" title="Step back (Left arrow)">
+          <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+        </button>
+        <button class="pb-btn" id="btn-play" title="Play/Pause (Space)">
+          <svg viewBox="0 0 24 24" id="play-icon"><path d="M8 5v14l11-7z"/></svg>
+        </button>
+        <button class="pb-btn" id="btn-step-fwd" title="Step forward (Right arrow)">
+          <svg viewBox="0 0 24 24"><path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z"/></svg>
+        </button>
+        <button class="pb-btn" id="btn-skip-end" title="Skip to end">
+          <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
+      </div>
+
+      <select class="speed-select" id="speed-select" title="Playback speed">
+        <option value="0.25">0.25x</option>
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="5">5x</option>
+        <option value="10">10x</option>
+      </select>
+
+      <div class="scrubber-container">
+        <input type="range" class="scrubber" id="scrubber" min="0" max="100" value="0">
+        <div class="time-display" id="time-display">0:00.0 / 0:00.0</div>
+      </div>
+    </div>
+
+    <!-- Stats summary -->
+    <div class="card" style="margin-bottom:1rem;">
+      <div class="card-label">Session Summary</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-title">Max Deviation</div>
+          <div class="stat-value" id="stat-max-dev" style="color:var(--red)">--</div>
+          <div class="stat-sub" id="stat-max-dev-time">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Avg Deviation</div>
+          <div class="stat-value" id="stat-avg-dev" style="color:var(--yellow)">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Time in Green</div>
+          <div class="stat-value" id="stat-green" style="color:var(--green)">--</div>
+          <div class="stat-sub" id="stat-green-pct">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Time in Yellow</div>
+          <div class="stat-value" id="stat-yellow" style="color:var(--yellow)">--</div>
+          <div class="stat-sub" id="stat-yellow-pct">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Time in Red</div>
+          <div class="stat-value" id="stat-red" style="color:var(--red)">--</div>
+          <div class="stat-sub" id="stat-red-pct">--</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Alert Events</div>
+          <div class="stat-value" id="stat-alerts" style="color:var(--red)">--</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="file-change">
+      <button onclick="loadNew()">Load Different Session</button>
+    </div>
+  </div>
+
+  <div class="kbd-hints" id="kbd-hints" style="display:none;">
+    <kbd>Space</kbd> Play/Pause &nbsp;
+    <kbd>&larr;</kbd> Step back &nbsp;
+    <kbd>&rarr;</kbd> Step forward &nbsp;
+    <kbd>Shift+&larr;</kbd> -1s &nbsp;
+    <kbd>Shift+&rarr;</kbd> +1s &nbsp;
+    <kbd>Home</kbd> Start &nbsp;
+    <kbd>End</kbd> End
+  </div>
+
+  <script>
+    // ---- Constants ----
+    const THRESHOLD_WARN = 20;
+    const THRESHOLD_ALERT = 25;
+
+    // ---- State ----
+    let sessionData = [];  // [{t, elapsed, roll, pitch, dev, alert}]
+    let currentIndex = 0;
+    let playing = false;
+    let playSpeed = 1;
+    let playTimer = null;
+    let chart = null;
+    let cursorAnnotation = null;
+
+    // ---- File handling ----
+    const uploadArea = document.getElementById('upload-area');
+    const fileInput = document.getElementById('file-input');
+
+    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('dragover', e => {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+    uploadArea.addEventListener('drop', e => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      if (e.dataTransfer.files.length > 0) loadFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length > 0) loadFile(fileInput.files[0]);
+    });
+
+    function loadFile(file) {
+      const reader = new FileReader();
+      reader.onload = e => {
+        const text = e.target.result;
+        parseCSV(text, file.name);
+      };
+      reader.readAsText(file);
+    }
+
+    function parseCSV(text, fileName) {
+      const lines = text.trim().split('\n');
+      if (lines.length < 2) return alert('CSV file is empty or has no data rows.');
+
+      const header = lines[0].toLowerCase();
+      sessionData = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',');
+        if (cols.length < 6) continue;
+        sessionData.push({
+          t: parseFloat(cols[0]),
+          elapsed: parseFloat(cols[1]),
+          roll: parseFloat(cols[2]),
+          pitch: parseFloat(cols[3]),
+          dev: parseFloat(cols[4]),
+          alert: parseInt(cols[5]) === 1
+        });
+      }
+
+      if (sessionData.length === 0) return alert('No valid data found in CSV.');
+
+      currentIndex = 0;
+      playing = false;
+      clearInterval(playTimer);
+      initUI(fileName);
+    }
+
+    // ---- Initialize UI ----
+    function initUI(fileName) {
+      uploadArea.style.display = 'none';
+      document.getElementById('main-content').classList.add('visible');
+      document.getElementById('kbd-hints').style.display = 'block';
+
+      // Session info
+      document.getElementById('session-name').textContent = fileName.replace('.csv', '');
+      const dur = sessionData[sessionData.length - 1].elapsed;
+      document.getElementById('total-dur').textContent = fmtTime(dur);
+      document.getElementById('total-samples').textContent = sessionData.length.toLocaleString();
+      const avgInterval = dur / (sessionData.length - 1);
+      document.getElementById('avg-rate').textContent = (1 / avgInterval).toFixed(0) + ' Hz';
+
+      // Scrubber
+      const scrubber = document.getElementById('scrubber');
+      scrubber.max = sessionData.length - 1;
+      scrubber.value = 0;
+
+      // Compute stats
+      computeStats();
+
+      // Build chart
+      buildChart();
+
+      // Draw gauge bg
+      drawGaugeBg();
+
+      // Draw heatmap
+      drawHeatmap();
+
+      // Show first frame
+      showFrame(0);
+    }
+
+    function computeStats() {
+      let maxDev = 0, maxDevIdx = 0, sumDev = 0;
+      let greenCount = 0, yellowCount = 0, redCount = 0;
+      let alertEvents = 0, lastAlert = false;
+
+      for (let i = 0; i < sessionData.length; i++) {
+        const s = sessionData[i];
+        sumDev += s.dev;
+        if (s.dev > maxDev) { maxDev = s.dev; maxDevIdx = i; }
+        if (s.dev < THRESHOLD_WARN) greenCount++;
+        else if (s.dev < THRESHOLD_ALERT) yellowCount++;
+        else redCount++;
+        if (s.alert && !lastAlert) alertEvents++;
+        lastAlert = s.alert;
+      }
+
+      const n = sessionData.length;
+      document.getElementById('stat-max-dev').textContent = maxDev.toFixed(1) + '\u00B0';
+      document.getElementById('stat-max-dev-time').textContent = 'at ' + fmtTime(sessionData[maxDevIdx].elapsed);
+      document.getElementById('stat-avg-dev').textContent = (sumDev / n).toFixed(1) + '\u00B0';
+      document.getElementById('stat-green').textContent = fmtTime(greenCount * avgInterval());
+      document.getElementById('stat-green-pct').textContent = (greenCount / n * 100).toFixed(1) + '%';
+      document.getElementById('stat-yellow').textContent = fmtTime(yellowCount * avgInterval());
+      document.getElementById('stat-yellow-pct').textContent = (yellowCount / n * 100).toFixed(1) + '%';
+      document.getElementById('stat-red').textContent = fmtTime(redCount * avgInterval());
+      document.getElementById('stat-red-pct').textContent = (redCount / n * 100).toFixed(1) + '%';
+      document.getElementById('stat-alerts').textContent = alertEvents;
+    }
+
+    function avgInterval() {
+      if (sessionData.length < 2) return 0;
+      return sessionData[sessionData.length - 1].elapsed / (sessionData.length - 1);
+    }
+
+    // ---- Chart ----
+    function buildChart() {
+      if (chart) chart.destroy();
+
+      const labels = sessionData.map(s => s.elapsed.toFixed(1) + 's');
+      const rollData = sessionData.map(s => s.roll);
+      const pitchData = sessionData.map(s => s.pitch);
+      const devData = sessionData.map(s => s.dev);
+
+      chart = new Chart(document.getElementById('chart').getContext('2d'), {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Roll',
+              data: rollData,
+              borderColor: '#f472b6',
+              backgroundColor: 'rgba(244,114,182,0.05)',
+              fill: false,
+              tension: 0.2,
+              pointRadius: 0,
+              borderWidth: 1.5
+            },
+            {
+              label: 'Pitch',
+              data: pitchData,
+              borderColor: '#818cf8',
+              backgroundColor: 'rgba(129,140,248,0.05)',
+              fill: false,
+              tension: 0.2,
+              pointRadius: 0,
+              borderWidth: 1.5
+            },
+            {
+              label: 'Deviation',
+              data: devData,
+              borderColor: 'rgba(251,191,36,0.6)',
+              backgroundColor: 'rgba(251,191,36,0.05)',
+              fill: true,
+              tension: 0.2,
+              pointRadius: 0,
+              borderWidth: 1,
+              borderDash: [4, 2]
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { intersect: false, mode: 'index' },
+          onClick(e) {
+            const points = chart.getElementsAtEventForMode(e, 'index', { intersect: false }, false);
+            if (points.length > 0) {
+              seekTo(points[0].index);
+            }
+          },
+          scales: {
+            x: {
+              display: true,
+              grid: { color: 'rgba(37,43,59,0.6)' },
+              ticks: { color: '#6b7394', maxTicksLimit: 10, font: { size: 10 } }
+            },
+            y: {
+              display: true,
+              grid: { color: 'rgba(37,43,59,0.6)' },
+              ticks: { color: '#6b7394', font: { size: 10 } }
+            }
+          },
+          plugins: {
+            legend: { labels: { color: '#e6e9f0', usePointStyle: true, pointStyle: 'circle', font: { size: 11 } } },
+            annotation: {
+              annotations: {
+                cursor: {
+                  type: 'line',
+                  xMin: 0,
+                  xMax: 0,
+                  borderColor: 'rgba(96, 165, 250, 0.8)',
+                  borderWidth: 2
+                },
+                threshHi: { type: 'line', yMin: THRESHOLD_ALERT, yMax: THRESHOLD_ALERT, borderColor: 'rgba(248,113,113,0.35)', borderWidth: 1, borderDash: [6, 4] },
+                threshLo: { type: 'line', yMin: -THRESHOLD_ALERT, yMax: -THRESHOLD_ALERT, borderColor: 'rgba(248,113,113,0.35)', borderWidth: 1, borderDash: [6, 4] }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function updateChartCursor(index) {
+      if (!chart) return;
+      const ann = chart.options.plugins.annotation.annotations.cursor;
+      ann.xMin = index;
+      ann.xMax = index;
+      chart.update('none');
+    }
+
+    // ---- Heatmap ----
+    function drawHeatmap() {
+      const canvas = document.getElementById('heatmap-canvas');
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = 20;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const n = sessionData.length;
+
+      for (let px = 0; px < w; px++) {
+        const idx = Math.floor(px / w * n);
+        const dev = sessionData[idx].dev;
+        let color;
+        if (dev < THRESHOLD_WARN) color = `rgba(52,211,153,${0.3 + dev / THRESHOLD_WARN * 0.7})`;
+        else if (dev < THRESHOLD_ALERT) color = `rgba(251,191,36,${0.5 + (dev - THRESHOLD_WARN) / 5 * 0.5})`;
+        else color = `rgba(248,113,113,${Math.min(1, 0.5 + (dev - THRESHOLD_ALERT) / 20 * 0.5)})`;
+        ctx.fillStyle = color;
+        ctx.fillRect(px, 0, 1, 20);
+      }
+
+      // Click to seek
+      canvas.parentElement.addEventListener('click', e => {
+        const r = canvas.parentElement.getBoundingClientRect();
+        const frac = (e.clientX - r.left) / r.width;
+        seekTo(Math.floor(frac * (sessionData.length - 1)));
+      });
+    }
+
+    function updateHeatmapCursor(index) {
+      const bar = document.getElementById('heatmap-bar');
+      const cursor = document.getElementById('heatmap-cursor');
+      const frac = index / (sessionData.length - 1);
+      cursor.style.left = (frac * 100) + '%';
+    }
+
+    // ---- Gauge ----
+    function drawGaugeBg() {
+      const c = document.getElementById('gauge-bg');
+      const ctx = c.getContext('2d');
+      const cx = 110, cy = 110, r = 95;
+      const startAngle = 0.75 * Math.PI;
+      const endAngle = 2.25 * Math.PI;
+      const totalArc = endAngle - startAngle;
+
+      ctx.clearRect(0, 0, 220, 220);
+      ctx.lineWidth = 10;
+      ctx.lineCap = 'round';
+
+      const g = startAngle + totalArc * (15 / 45);
+      ctx.beginPath(); ctx.arc(cx, cy, r, startAngle, g);
+      ctx.strokeStyle = 'rgba(52,211,153,0.2)'; ctx.stroke();
+
+      const y = startAngle + totalArc * (25 / 45);
+      ctx.beginPath(); ctx.arc(cx, cy, r, g, y);
+      ctx.strokeStyle = 'rgba(251,191,36,0.2)'; ctx.stroke();
+
+      ctx.beginPath(); ctx.arc(cx, cy, r, y, endAngle);
+      ctx.strokeStyle = 'rgba(248,113,113,0.2)'; ctx.stroke();
+    }
+
+    function drawGaugeFg(dev) {
+      const c = document.getElementById('gauge-fg');
+      const ctx = c.getContext('2d');
+      const cx = 110, cy = 110, r = 95;
+      const startAngle = 0.75 * Math.PI;
+      const endAngle = 2.25 * Math.PI;
+      const totalArc = endAngle - startAngle;
+
+      ctx.clearRect(0, 0, 220, 220);
+      if (dev == null) return;
+
+      const clamped = Math.min(Math.max(dev, 0), 45);
+      const angle = startAngle + totalArc * (clamped / 45);
+
+      let color;
+      if (dev < THRESHOLD_WARN) color = 'rgb(52,211,153)';
+      else if (dev < THRESHOLD_ALERT) color = 'rgb(251,191,36)';
+      else color = 'rgb(248,113,113)';
+
+      ctx.lineWidth = 10;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, startAngle, angle);
+      ctx.strokeStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 15;
+      ctx.stroke();
+    }
+
+    // ---- Hip dot + trail ----
+    function hipPos(roll, pitch) {
+      const maxDeg = 40;
+      const pxRange = 85; // radius for 200px container
+      let dx = Math.max(-maxDeg, Math.min(maxDeg, roll));
+      let dy = Math.max(-maxDeg, Math.min(maxDeg, pitch));
+      let px = (dx / maxDeg) * pxRange;
+      let py = -(dy / maxDeg) * pxRange;
+      const dist = Math.sqrt(px * px + py * py);
+      if (dist > pxRange) { px = (px / dist) * pxRange; py = (py / dist) * pxRange; }
+      return { px, py };
+    }
+
+    function drawTrail(currentIdx) {
+      const canvas = document.getElementById('hip-trail');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, 200, 200);
+
+      if (!document.getElementById('show-trail').checked) return;
+
+      const trailLen = parseInt(document.getElementById('trail-len').value);
+      const start = trailLen === 0 ? 0 : Math.max(0, currentIdx - trailLen);
+      const cx = 100, cy = 100;
+
+      if (currentIdx - start < 2) return;
+
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      for (let i = start; i < currentIdx; i++) {
+        const s = sessionData[i];
+        const sNext = sessionData[i + 1];
+        if (!sNext) break;
+
+        const p1 = hipPos(s.roll, s.pitch);
+        const p2 = hipPos(sNext.roll, sNext.pitch);
+
+        // Fade: older = more transparent
+        const age = (i - start) / (currentIdx - start);
+        const alpha = 0.05 + age * 0.4;
+
+        // Color by deviation
+        let color;
+        if (s.dev < THRESHOLD_WARN) color = `rgba(52,211,153,${alpha})`;
+        else if (s.dev < THRESHOLD_ALERT) color = `rgba(251,191,36,${alpha})`;
+        else color = `rgba(248,113,113,${alpha})`;
+
+        ctx.beginPath();
+        ctx.moveTo(cx + p1.px, cy + p1.py);
+        ctx.lineTo(cx + p2.px, cy + p2.py);
+        ctx.strokeStyle = color;
+        ctx.stroke();
+      }
+    }
+
+    function updateHipDot(roll, pitch, dev) {
+      const dot = document.getElementById('hip-dot');
+      const { px, py } = hipPos(roll, pitch);
+
+      dot.style.left = `calc(50% + ${px}px)`;
+      dot.style.top = `calc(50% + ${py}px)`;
+
+      if (dev < THRESHOLD_WARN) {
+        dot.style.background = 'var(--green)';
+        dot.style.boxShadow = '0 0 12px rgba(52,211,153,0.6)';
+      } else if (dev < THRESHOLD_ALERT) {
+        dot.style.background = 'var(--yellow)';
+        dot.style.boxShadow = '0 0 12px rgba(251,191,36,0.6)';
+      } else {
+        dot.style.background = 'var(--red)';
+        dot.style.boxShadow = '0 0 12px rgba(248,113,113,0.6)';
+      }
+    }
+
+    // ---- Show frame ----
+    function showFrame(index) {
+      if (index < 0 || index >= sessionData.length) return;
+      currentIndex = index;
+      const s = sessionData[index];
+
+      // Values
+      document.getElementById('roll-val').textContent = s.roll.toFixed(1) + '\u00B0';
+      document.getElementById('pitch-val').textContent = s.pitch.toFixed(1) + '\u00B0';
+      document.getElementById('dev-value').textContent = s.dev.toFixed(1);
+
+      // Status label
+      if (s.dev < THRESHOLD_WARN) {
+        document.getElementById('dev-status').textContent = 'Good position';
+        document.getElementById('dev-status').style.color = 'var(--green)';
+      } else if (s.dev < THRESHOLD_ALERT) {
+        document.getElementById('dev-status').textContent = 'Watch posture';
+        document.getElementById('dev-status').style.color = 'var(--yellow)';
+      } else {
+        document.getElementById('dev-status').textContent = s.alert ? 'HIP DROP!' : 'Hip drop!';
+        document.getElementById('dev-status').style.color = 'var(--red)';
+      }
+
+      // Gauge
+      drawGaugeFg(s.dev);
+
+      // Hip dot + trail
+      updateHipDot(s.roll, s.pitch, s.dev);
+      drawTrail(index);
+
+      // Chart cursor
+      updateChartCursor(index);
+
+      // Heatmap cursor
+      updateHeatmapCursor(index);
+
+      // Scrubber
+      document.getElementById('scrubber').value = index;
+
+      // Time display
+      const totalDur = sessionData[sessionData.length - 1].elapsed;
+      document.getElementById('time-display').textContent =
+        fmtTime(s.elapsed) + ' / ' + fmtTime(totalDur);
+
+      // Update play icon
+      updatePlayIcon();
+    }
+
+    // ---- Playback ----
+    function togglePlay() {
+      if (playing) {
+        pause();
+      } else {
+        play();
+      }
+    }
+
+    function play() {
+      if (currentIndex >= sessionData.length - 1) currentIndex = 0;
+      playing = true;
+      updatePlayIcon();
+      scheduleNext();
+    }
+
+    function pause() {
+      playing = false;
+      clearTimeout(playTimer);
+      updatePlayIcon();
+    }
+
+    function scheduleNext() {
+      if (!playing || currentIndex >= sessionData.length - 1) {
+        playing = false;
+        updatePlayIcon();
+        return;
+      }
+      const current = sessionData[currentIndex];
+      const next = sessionData[currentIndex + 1];
+      const dt = (next.elapsed - current.elapsed) * 1000 / playSpeed;
+      const delay = Math.max(1, Math.min(dt, 200)); // clamp to prevent freezing
+
+      playTimer = setTimeout(() => {
+        currentIndex++;
+        showFrame(currentIndex);
+        scheduleNext();
+      }, delay);
+    }
+
+    function seekTo(index) {
+      const wasPlaying = playing;
+      pause();
+      showFrame(Math.max(0, Math.min(sessionData.length - 1, index)));
+      if (wasPlaying) play();
+    }
+
+    function stepForward(n) {
+      pause();
+      showFrame(Math.min(sessionData.length - 1, currentIndex + n));
+    }
+
+    function stepBack(n) {
+      pause();
+      showFrame(Math.max(0, currentIndex - n));
+    }
+
+    function updatePlayIcon() {
+      const icon = document.getElementById('play-icon');
+      if (playing) {
+        icon.innerHTML = '<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>';
+      } else {
+        icon.innerHTML = '<path d="M8 5v14l11-7z"/>';
+      }
+    }
+
+    // ---- Event listeners ----
+    document.getElementById('btn-play').addEventListener('click', togglePlay);
+    document.getElementById('btn-skip-start').addEventListener('click', () => seekTo(0));
+    document.getElementById('btn-skip-end').addEventListener('click', () => seekTo(sessionData.length - 1));
+    document.getElementById('btn-step-back').addEventListener('click', () => stepBack(1));
+    document.getElementById('btn-step-fwd').addEventListener('click', () => stepForward(1));
+
+    document.getElementById('scrubber').addEventListener('input', e => {
+      seekTo(parseInt(e.target.value));
+    });
+
+    document.getElementById('speed-select').addEventListener('change', e => {
+      playSpeed = parseFloat(e.target.value);
+    });
+
+    document.getElementById('show-trail').addEventListener('change', () => drawTrail(currentIndex));
+    document.getElementById('trail-len').addEventListener('change', () => drawTrail(currentIndex));
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', e => {
+      if (sessionData.length === 0) return;
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault();
+          togglePlay();
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          if (e.shiftKey) {
+            // Jump ~1 second back
+            const targetElapsed = sessionData[currentIndex].elapsed - 1;
+            let idx = currentIndex;
+            while (idx > 0 && sessionData[idx].elapsed > targetElapsed) idx--;
+            seekTo(idx);
+          } else {
+            stepBack(1);
+          }
+          break;
+        case 'ArrowRight':
+          e.preventDefault();
+          if (e.shiftKey) {
+            const targetElapsed = sessionData[currentIndex].elapsed + 1;
+            let idx = currentIndex;
+            while (idx < sessionData.length - 1 && sessionData[idx].elapsed < targetElapsed) idx++;
+            seekTo(idx);
+          } else {
+            stepForward(1);
+          }
+          break;
+        case 'Home':
+          e.preventDefault();
+          seekTo(0);
+          break;
+        case 'End':
+          e.preventDefault();
+          seekTo(sessionData.length - 1);
+          break;
+      }
+    });
+
+    // ---- Helpers ----
+    function fmtTime(s) {
+      if (s == null || isNaN(s)) return '--';
+      const mins = Math.floor(s / 60);
+      const secs = s % 60;
+      return mins + ':' + secs.toFixed(1).padStart(4, '0');
+    }
+
+    function loadNew() {
+      pause();
+      sessionData = [];
+      document.getElementById('main-content').classList.remove('visible');
+      document.getElementById('kbd-hints').style.display = 'none';
+      uploadArea.style.display = '';
+      fileInput.value = '';
+    }
+  </script>
+</body>
+</html>

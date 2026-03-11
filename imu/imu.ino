@@ -48,7 +48,7 @@ bool  calibrated    = false;
 const int CAL_SAMPLES = 200;  // ~2 seconds at 100 Hz
 
 // --- Hip Drop Detection (rolling-window debounce) ---
-const float ALERT_THRESHOLD = 20.0;  // degrees of deviation
+const float ALERT_THRESHOLD = 25.0;  // degrees of deviation
 
 // Rolling window: 50 samples at 100 Hz = 0.5 seconds
 // Trigger when >= 40 of the last 50 samples exceed threshold (~80%)
